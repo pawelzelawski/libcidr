@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+
+# Static and shared libraries produced in-tree
+*.a
+*.so
+
+# Python extension artifacts
+python/*.so
+
+# Editor / OS files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/

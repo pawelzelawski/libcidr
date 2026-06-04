@@ -3,13 +3,13 @@
 ## Status Overview
 
 **Current Phase**: Phase 1 - Foundation
-**Next Task**: Phase 1.1 - Repository skeleton
+**Next Task**: Phase 1.2 - Test harness
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | PENDING | 0/0 | Build system, test harness, skeleton |
+| 1 | Foundation | IN PROGRESS | 0/0 | Skeleton done; test harness next |
 | 2 | Address Arithmetic Engine | PENDING | 0/0 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | PENDING | 0/0 | Parse, arithmetic ops, subnet iterator |
 | 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
@@ -100,7 +100,7 @@ present. Code compiles clean with zero warnings.
 
 ### Tasks
 
-**1.1 -- Repository skeleton**
+**1.1 -- Repository skeleton** ✓ DONE
 - Create directory structure per REPOSITORY_STRUCTURE.md §1:
   `src/`, `include/`, `python/`, `tests/`, `bench/`
 - Create `include/libcidr.h` with skeleton: include guards, `<stddef.h>`,
@@ -148,14 +148,14 @@ present. Code compiles clean with zero warnings.
 
 ### Phase 1 Completion Criteria
 
-- [ ] `make dev` succeeds with zero warnings on Linux x86_64
+- [x] `make dev` succeeds with zero warnings on Linux x86_64
 - [ ] `make dev` succeeds with zero warnings on Linux ARM64
-- [ ] `make dev` succeeds with zero warnings on OpenBSD amd64
+- [x] `make dev` succeeds with zero warnings on OpenBSD amd64
 - [ ] `make dev` succeeds with zero warnings on OpenBSD arm64
-- [ ] `make test` runs and prints `0/0 tests passed` on all four targets
-- [ ] `make valgrind` exits clean on Linux
+- [x] `make test` runs and prints `0/0 tests passed` on all four targets
+- [x] `make valgrind` exits clean on Linux
 - [ ] `make python-ext` builds and `make python-check-abi` passes
-- [ ] `make lint` produces zero warnings on all stub source files
+- [x] `make lint` produces zero warnings on all stub source files
 - [ ] Quality milestone M1 confirmed
 
 ---
