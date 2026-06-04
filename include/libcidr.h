@@ -131,4 +131,25 @@ typedef struct cidr_index cidr_index_t;
 /* IANA special-purpose registry snapshot date. See ARCHITECTURE.md §7.2. */
 #define CIDR_IANA_SNAPSHOT 20251009
 
+/*
+ * cidr_addr_parse - parse an IPv4 or IPv6 address from text.
+ *
+ * Accepts strict dotted-decimal notation for IPv4 per ARCHITECTURE.md §4.1.1:
+ * exactly four decimal octets 0-255 separated by dots, no leading zeros,
+ * no hex, no whitespace, no trailing characters.
+ * IPv6 parsing per ARCHITECTURE.md §4.1.2 is implemented in a later phase.
+ *
+ * src:  null-terminated address string
+ * out:  caller-provided cidr_addr_t; written with CIDR_AF_INET on success,
+ *       CIDR_AF_UNSPEC on failure
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if src or out is NULL.
+ * Returns CIDR_ERR_PARSE if the text does not match a valid address form.
+ *
+ * See ARCHITECTURE.md §4.1.1 for the full IPv4 rejection case table.
+ */
+cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

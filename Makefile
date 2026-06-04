@@ -73,7 +73,7 @@ LIB_SRCS = src/cidr_addr.c					\
            src/cidr_classify.c				\
            src/cidr_index.c
 
-TEST_SRCS = tests/run_tests.c
+TEST_SRCS = tests/run_tests.c tests/test_addr.c
 
 # --- Build paths --------------------------------------------------------------
 
@@ -260,6 +260,7 @@ format:
 	    include/libcidr.h						\
 	    python/_libcidr_ext.c					\
 	    tests/run_tests.c						\
+	    tests/test_addr.c						\
 	    tests/test_harness.h
 
 # --- install -------------------------------------------------------------------

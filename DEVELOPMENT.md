@@ -193,7 +193,7 @@ targets.
   relying on it
 - Define `CIDR_ADDR_STR_MAX = 46` in `include/libcidr.h`
 
-**2.2 -- IPv4 parsing**
+**2.2 -- IPv4 parsing** ✓ DONE
 - Implement the IPv4 path of `cidr_addr_parse()` in `src/cidr_addr.c`
 - Strict dotted-decimal only: exactly four decimal octets 0-255, dot
   separators, no leading zeros, no hex, no whitespace, no trailing characters
