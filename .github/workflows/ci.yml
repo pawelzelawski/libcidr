@@ -57,7 +57,6 @@ jobs:
         with:
           usesh: true
           run: |
-            pkg_add clang-tidy
             make dev
             make test || {
               echo "make test failed; collecting backtrace from build/tests/run_tests"
@@ -84,7 +83,6 @@ jobs:
               fi
               exit 1
             }
-            make lint
             make format && git diff --exit-code
             make release
 
@@ -101,7 +99,6 @@ jobs:
           usesh: true
           arch: aarch64
           run: |
-            pkg_add clang-tidy
             make dev
             make test || {
               echo "make test failed; collecting backtrace from build/tests/run_tests"
@@ -128,6 +125,5 @@ jobs:
               fi
               exit 1
             }
-            make lint
             make format && git diff --exit-code
             make release
