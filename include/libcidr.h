@@ -4,13 +4,20 @@
 /*
  * libcidr.h - libcidr public API
  *
- * Parse and format IPv4/IPv6 addresses: cidr_addr_parse(), cidr_addr_format()
- * Parse and format CIDR prefixes:       cidr_prefix_parse(),
- * cidr_prefix_from_host() Prefix arithmetic: cidr_prefix_contains(),
- * cidr_prefix_overlaps() Subnet enumeration: cidr_subnet_iter_init(),
- * cidr_subnet_iter_next() Bulk operations: cidr_bulk_parse(),
- * cidr_bulk_aggregate() Prefix index: cidr_index_create(), cidr_index_lookup()
- * Address classification:               cidr_addr_classify()
+ * Parse and format IPv4/IPv6 addresses:
+ *     cidr_addr_parse(), cidr_addr_format()
+ * Parse and format CIDR prefixes:
+ *     cidr_prefix_parse(), cidr_prefix_from_host()
+ * Prefix arithmetic:
+ *     cidr_prefix_contains(), cidr_prefix_overlaps()
+ * Subnet enumeration:
+ *     cidr_subnet_iter_init(), cidr_subnet_iter_next()
+ * Bulk operations:
+ *     cidr_bulk_parse(), cidr_bulk_aggregate()
+ * Prefix index:
+ *     cidr_index_create(), cidr_index_lookup()
+ * Address classification:
+ *     cidr_addr_classify()
  *
  * See ARCHITECTURE.md for the full API specification and design rationale.
  */

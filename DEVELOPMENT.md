@@ -2,15 +2,15 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 1 - Foundation
+**Current Phase**: Phase 2 - Address Arithmetic Engine
 **Next Task**: Phase 2.1 -- `cidr_family_t`, `cidr_addr_t`, `cidr_err_t`
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | IN PROGRESS | 0/0 | Test harness and Python skeleton done |
-| 2 | Address Arithmetic Engine | PENDING | 0/0 | Parse, format, extraction, comparison |
+| 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
+| 2 | Address Arithmetic Engine | IN PROGRESS | 0/0 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | PENDING | 0/0 | Parse, arithmetic ops, subnet iterator |
 | 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
@@ -22,7 +22,7 @@
 
 | ID | Milestone | Status |
 |---|---|---|
-| M1 | Build system works on Linux and OpenBSD, both architectures | PENDING |
+| M1 | Build system works on Linux and OpenBSD, both architectures | CONFIRMED |
 | M2 | All C tests pass on Linux | PENDING |
 | M3 | All C tests pass on OpenBSD | PENDING |
 | M4 | Valgrind clean on Linux | PENDING |
@@ -149,14 +149,14 @@ present. Code compiles clean with zero warnings.
 ### Phase 1 Completion Criteria
 
 - [x] `make dev` succeeds with zero warnings on Linux x86_64
-- [ ] `make dev` succeeds with zero warnings on Linux ARM64
+- [x] `make dev` succeeds with zero warnings on Linux ARM64
 - [x] `make dev` succeeds with zero warnings on OpenBSD amd64
-- [ ] `make dev` succeeds with zero warnings on OpenBSD arm64
+- [x] `make dev` succeeds with zero warnings on OpenBSD arm64
 - [x] `make test` runs and prints `0/0 tests passed` on all four targets
 - [x] `make valgrind` exits clean on Linux
 - [x] `make python-ext` builds and `make python-check-abi` passes
 - [x] `make lint` produces zero warnings on all stub source files
-- [ ] Quality milestone M1 confirmed (pending ARM64 CI)
+- [x] Quality milestone M1 confirmed
 
 ---
 

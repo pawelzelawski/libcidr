@@ -34,7 +34,7 @@ AR = ar
 
 # --- Compiler flags ----------------------------------------------------------
 
-CFLAGS_COMMON = -std=c11 -Wall -Wextra -Wpedantic		\
+CFLAGS_COMMON = -std=c11 -Wall -Wextra -Wpedantic -Werror	\
                 -Wno-unused-parameter				\
                 -fno-omit-frame-pointer				\
                 -D_POSIX_C_SOURCE=200809L			\
@@ -49,8 +49,7 @@ CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DCIDR_LINUX"; \
 SANITIZERS != if [ "$(OS)" = "Linux" ]; then echo "-fsanitize=address,undefined"; else echo ""; fi
 
 CFLAGS_DEV     = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
-                 -O1 -g					\
-                 -Werror						\
+                 -O1 -g						\
                  $(SANITIZERS)					\
                  -DCIDR_TEST
 
@@ -124,10 +123,11 @@ INCLUDEDIR ?= $(PREFIX)/include
 
 # --- Phony targets ------------------------------------------------------------
 
-.PHONY: all dev release test test-tsan valgrind lint format clean install	\
-        python-ext python-check-abi python-dev test-python
+.PHONY: all dev release shared test test-tsan valgrind lint format clean	\
+        install python-ext python-check-abi python-install python-dev	\
+        test-python bench bench-python
 
-all: dev
+all: release
 
 # --- dev: debug build + run tests ---------------------------------------------
 
@@ -137,6 +137,11 @@ dev: $(TEST_BIN)
 # --- release: optimised static library -----------------------------------------
 
 release: $(LIB_RELEASE)
+
+# --- shared: shared C library (stub) ------------------------------------------
+
+shared:
+	@echo "shared library not yet implemented (Phase 1 stub)"
 
 # --- test: same as dev (alias) ------------------------------------------------
 
@@ -196,6 +201,12 @@ python-check-abi:
 	@echo "$(PYEXT_ABI3)" | grep -q "abi3" || \
 	    (echo "ERROR: extension was not built against stable ABI"; exit 1)
 
+python-install: $(PY_DIR)/$(PYEXT_ABI3)
+	@PYSITE=$$($(PY) -c "import site; print(site.getsitepackages()[0])"); \
+	    echo "Installing to $${PYSITE}/$(PYEXT_ABI3)"; \
+	    install -d $(DESTDIR)$${PYSITE}; \
+	    install -m 644 $(PY_DIR)/$(PYEXT_ABI3) $(DESTDIR)$${PYSITE}/$(PYEXT_ABI3)
+
 python-dev:
 	@mkdir -p $(BUILD_DIR)/pydev
 	$(CC) -std=c11 -Wall -Wextra -Werror -fno-omit-frame-pointer	\
@@ -217,12 +228,16 @@ test-python: $(PY_DIR)/$(PYEXT_ABI3)
 # Built under release flags. Stubs until implemented.
 
 bench:
-	@echo "Benchmarks not yet implemented (Phase 8)"
+	@echo "C benchmarks not yet implemented (Phase 8)"
+
+bench-python:
+	@echo "Python benchmarks not yet implemented (Phase 8)"
 
 # --- lint: clang-tidy + cppcheck -----------------------------------------------
 
 lint:
-	clang-tidy $(LIB_SRCS) -- $(CFLAGS_DEV) $(INCLUDES)
+	clang-tidy $(LIB_SRCS) python/_libcidr_ext.c		\
+	    -- $(CFLAGS_DEV) $(INCLUDES) $(PYINC)
 	@if command -v cppcheck >/dev/null 2>&1; then \
 	    cppcheck --enable=all --error-exitcode=1		\
 	             --suppress=missingIncludeSystem		\
