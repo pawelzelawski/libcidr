@@ -1,12 +1,14 @@
 # Build artifacts
 build/
 
+# Stale object files from old Makefile (new Makefile uses build/)
+*.o
+
 # Static and shared libraries produced in-tree
 *.a
-*.so
 
 # Python extension artifacts
-python/*.so
+python/*.abi3.so
 
 # Editor / OS files
 *.swp
