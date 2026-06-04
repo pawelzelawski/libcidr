@@ -57,6 +57,7 @@ jobs:
         with:
           usesh: true
           run: |
+            pkg_add clang-tidy
             make dev
             make test || {
               echo "make test failed; collecting backtrace from build/tests/run_tests"
@@ -100,6 +101,7 @@ jobs:
           usesh: true
           arch: aarch64
           run: |
+            pkg_add clang-tidy
             make dev
             make test || {
               echo "make test failed; collecting backtrace from build/tests/run_tests"
