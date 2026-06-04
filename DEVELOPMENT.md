@@ -3,13 +3,13 @@
 ## Status Overview
 
 **Current Phase**: Phase 1 - Foundation
-**Next Task**: Phase 1.2 - Test harness
+**Next Task**: Phase 2.1 -- `cidr_family_t`, `cidr_addr_t`, `cidr_err_t`
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
 |---|---|---|---|---|
-| 1 | Foundation | IN PROGRESS | 0/0 | Skeleton done; test harness next |
+| 1 | Foundation | IN PROGRESS | 0/0 | Test harness and Python skeleton done |
 | 2 | Address Arithmetic Engine | PENDING | 0/0 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | PENDING | 0/0 | Parse, arithmetic ops, subnet iterator |
 | 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
@@ -128,7 +128,7 @@ present. Code compiles clean with zero warnings.
 - Verify `make dev` and `make release` compile all stubs with zero warnings
   on all four targets
 
-**1.2 -- Test harness**
+**1.2 -- Test harness** ✓ DONE
 - Create `tests/test_harness.h` with the `RUN(name, fn)` macro per
   TECH_STACK.md §6.1
 - Create `tests/run_tests.c` as the test binary entry point with empty
@@ -138,7 +138,7 @@ present. Code compiles clean with zero warnings.
 - Verify `make valgrind` runs the (empty) test binary under Valgrind on
   Linux and exits clean
 
-**1.3 -- Python extension skeleton**
+**1.3 -- Python extension skeleton** ✓ DONE
 - Verify `make python-ext` compiles `python/_libcidr_ext.c` against the
   installed CPython headers using `python3-config`
 - Verify `make python-check-abi` confirms the resulting `.so` suffix
@@ -154,9 +154,9 @@ present. Code compiles clean with zero warnings.
 - [ ] `make dev` succeeds with zero warnings on OpenBSD arm64
 - [x] `make test` runs and prints `0/0 tests passed` on all four targets
 - [x] `make valgrind` exits clean on Linux
-- [ ] `make python-ext` builds and `make python-check-abi` passes
+- [x] `make python-ext` builds and `make python-check-abi` passes
 - [x] `make lint` produces zero warnings on all stub source files
-- [ ] Quality milestone M1 confirmed
+- [ ] Quality milestone M1 confirmed (pending ARM64 CI)
 
 ---
 

@@ -97,12 +97,18 @@ TEST_BIN_VG   = $(BUILD_TESTS_DIR)/run_tests_vg
 INCLUDES = -I include/
 
 # --- Python extension ---------------------------------------------------------
+#
+# Stable ABI: the extension is compiled with Py_LIMITED_API = 0x030B0000
+# and the output filename uses the .abi3.so suffix. The extension does NOT
+# link against libpython; Python symbols are resolved at load time by the
+# interpreter. See TECH_STACK.md §5.1 for the build approach.
 
 PY        != command -v python3 2>/dev/null || echo python3
 PYCONFIG  != command -v python3-config 2>/dev/null || echo python3-config
 PYINC     != $(PYCONFIG) --includes 2>/dev/null || echo ""
-PYLDFLAGS != $(PYCONFIG) --ldflags --embed 2>/dev/null || echo ""
-PYSUFFIX  != $(PY) -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))" 2>/dev/null || echo ""
+
+# Stable ABI extension: .abi3.so suffix, no version-specific tag.
+PYEXT_ABI3 = libcidr.abi3.so
 
 CFLAGS_PYEXT = -std=c11 -Wall -Wextra -Werror -fno-omit-frame-pointer	\
                -O2 -DNDEBUG -fPIC					\
@@ -177,17 +183,17 @@ valgrind: $(TEST_BIN_VG)
 
 # --- Python extension ----------------------------------------------------------
 
-python-ext: $(PY_DIR)/libcidr$(PYSUFFIX)
+python-ext: $(PY_DIR)/$(PYEXT_ABI3)
 
 $(PY_DIR)/_libcidr_ext.o: $(PY_DIR)/_libcidr_ext.c include/libcidr.h
 	$(CC) $(CFLAGS_PYEXT) -c $< -o $@
 
-$(PY_DIR)/libcidr$(PYSUFFIX): $(PY_DIR)/_libcidr_ext.o $(LIB_RELEASE)
-	$(CC) -shared $(PYLDFLAGS) $^ -o $@
+$(PY_DIR)/$(PYEXT_ABI3): $(PY_DIR)/_libcidr_ext.o $(LIB_RELEASE)
+	$(CC) -shared $^ -o $@
 
 python-check-abi:
-	@echo "Extension suffix: $(PYSUFFIX)"
-	@echo "$(PYSUFFIX)" | grep -q "abi3" || \
+	@echo "Extension filename: $(PYEXT_ABI3)"
+	@echo "$(PYEXT_ABI3)" | grep -q "abi3" || \
 	    (echo "ERROR: extension was not built against stable ABI"; exit 1)
 
 python-dev:
@@ -200,11 +206,11 @@ python-dev:
 	      -I include/						\
 	      -c $(PY_DIR)/_libcidr_ext.c				\
 	      -o $(BUILD_DIR)/pydev/_libcidr_ext.o
-	$(CC) -shared $(PYLDFLAGS)					\
+	$(CC) -shared							\
 	      $(BUILD_DIR)/pydev/_libcidr_ext.o $(LIB_DEV)		\
-	      -o $(PY_DIR)/libcidr$(PYSUFFIX)
+	      -o $(PY_DIR)/$(PYEXT_ABI3)
 
-test-python: $(PY_DIR)/libcidr$(PYSUFFIX)
+test-python: $(PY_DIR)/$(PYEXT_ABI3)
 	PYTHONPATH=$(PY_DIR) $(PY) -m unittest tests.test_python -v
 
 # --- Benchmarks (Phase 8) -----------------------------------------------------
