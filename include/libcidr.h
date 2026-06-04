@@ -51,7 +51,22 @@ typedef struct {
 	uint8_t pfxlen;
 } cidr_prefix_t;
 
-/* Error codes. Zero is always success. See ARCHITECTURE.md §3.4. */
+/*
+ * Error codes.
+ *
+ * CIDR_OK (0) is always success. All public functions except
+ * cidr_index_destroy() return cidr_err_t and carry
+ * __attribute__((warn_unused_result)).
+ *
+ * CIDR_ERR_DONE is a sentinel returned by cidr_subnet_iter_next() when
+ * the iterator is exhausted. It is not an error -- it is the normal
+ * termination condition.
+ *
+ * CIDR_ERR_NOMEM appears only in cidr_index_create(). No other function
+ * allocates memory and therefore no other function can return this code.
+ *
+ * See ARCHITECTURE.md §3.4 for the full error code semantics.
+ */
 typedef enum {
 	CIDR_OK = 0,
 	CIDR_ERR_INVAL = 1,

@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 2 - Address Arithmetic Engine
-**Next Task**: Phase 2.1 -- `cidr_family_t`, `cidr_addr_t`, `cidr_err_t`
+**Next Task**: Phase 2.2 -- IPv4 parsing
 
 ### Phase Summary
 
@@ -183,7 +183,7 @@ targets.
 
 ### Tasks
 
-**2.1 -- `cidr_family_t`, `cidr_addr_t`, `cidr_err_t`**
+**2.1 -- `cidr_family_t`, `cidr_addr_t`, `cidr_err_t`** ✓ DONE
 - Define the three types in `include/libcidr.h` per ARCHITECTURE.md §3.1,
   §3.2, §3.4
 - Replace placeholder `_Static_assert` entries in `src/cidr_internal.h`
