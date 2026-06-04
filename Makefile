@@ -242,6 +242,7 @@ lint:
 	    cppcheck --enable=all --error-exitcode=1		\
 	             --suppress=missingIncludeSystem		\
 	             --suppress=unusedFunction			\
+	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \
 	    echo "cppcheck not found; skipping"; \

@@ -9,6 +9,21 @@
 #include "cidr_internal.h"
 
 /*
+ * hex_val - convert a hex digit character to its integer value.
+ * Returns -1 if the character is not a valid hex digit.
+ */
+static int hex_val(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+/*
  * addr_parse_ipv4 - strict dotted-decimal IPv4 parser.
  *
  * Parses exactly four decimal octets 0-255 separated by dots.
@@ -97,24 +112,444 @@ static cidr_err_t addr_parse_ipv4(const char *src, cidr_addr_t *out)
 }
 
 /*
+ * ipv4_suffix_parse - parse a strict dotted-decimal IPv4 address
+ * at the end of a mixed-notation IPv6 input.
+ *
+ * Parses exactly four decimal octets 0-255 separated by dots.
+ * Leading zeros rejected. No hex, no whitespace, no trailing chars.
+ *
+ * Writes the four octets into octets[0..3]. The caller has
+ * validated that suffix is non-empty.
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_PARSE on malformed input.
+ */
+static cidr_err_t ipv4_suffix_parse(const char *suffix, uint8_t *octets)
+{
+	const char *p = suffix;
+	int octet_count = 0;
+
+	if (*p == '\0')
+		return CIDR_ERR_PARSE;
+
+	while (*p != '\0') {
+		int value = 0;
+
+		if (*p < '0' || *p > '9')
+			return CIDR_ERR_PARSE;
+
+		if (*p == '0') {
+			p++;
+			if (*p >= '0' && *p <= '9')
+				return CIDR_ERR_PARSE;
+		} else {
+			while (*p >= '0' && *p <= '9') {
+				value = value * 10 + (*p - '0');
+				if (value > 255)
+					return CIDR_ERR_PARSE;
+				p++;
+			}
+		}
+
+		if (octet_count >= 4)
+			return CIDR_ERR_PARSE;
+
+		octets[octet_count] = (uint8_t)value;
+		octet_count++;
+
+		if (*p == '.') {
+			p++;
+			if (*p == '\0')
+				return CIDR_ERR_PARSE;
+			continue;
+		}
+		if (*p == '\0')
+			break;
+		return CIDR_ERR_PARSE;
+	}
+
+	if (octet_count != 4)
+		return CIDR_ERR_PARSE;
+	return CIDR_OK;
+}
+
+/*
+ * is_mixed_suffix - return true if the text after last_colon
+ * looks like a strict dotted-decimal IPv4 address.
+ *
+ * Quick check: must contain at least one '.'. Full validity is
+ * verified by ipv4_suffix_parse() which is called afterwards.
+ */
+static bool is_mixed_suffix(const char *s)
+{
+	if (*s == '\0')
+		return false;
+	while (*s != '\0') {
+		if (*s == '.')
+			return true;
+		s++;
+	}
+	return false;
+}
+
+/*
+ * addr_parse_ipv6 - parse an IPv6 address from text.
+ *
+ * Accepts the three text forms defined in RFC 4291 §2.2, as
+ * updated by RFC 5952:
+ *
+ *   1. Full form: eight 16-bit hex groups separated by colons.
+ *   2. Compressed form: :: replaces one or more consecutive
+ *      all-zero 16-bit groups. :: may appear at most once.
+ *   3. Mixed form: six hex groups followed by an IPv4
+ *      dotted-decimal tail. Accepted only when the result
+ *      falls within the IPv4-mapped prefix ::ffff:0:0/96
+ *      (first 10 bytes zero, bytes 10-11 = 0xFF 0xFF).
+ *
+ * Uppercase and mixed-case hex digits are accepted on input.
+ * The stored address is always in binary network byte order.
+ *
+ * IPv4-compatible addresses (::x.x.x.x where the first 12 bytes
+ * are all zero) are rejected per RFC 4291 §2.5.5.1 deprecation.
+ *
+ * src:  null-terminated IPv6 address string (validated non-NULL
+ *       and confirmed to contain ':' by the caller)
+ * out:  caller-provided cidr_addr_t; family NOT written on failure
+ *       (the caller, cidr_addr_parse, handles this)
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_PARSE on any malformed input.
+ *
+ * See ARCHITECTURE.md §4.1.2 for the full IPv6 parsing specification.
+ */
+static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
+{
+	const char *p;
+	const char *last_colon = NULL;
+	bool has_cc = false;
+	int max_groups, total_explicit;
+	uint16_t before[8], after[8];
+	int before_count = 0, after_count = 0;
+	int i, byte_idx, zero_groups;
+
+	if (*src == '\0')
+		return CIDR_ERR_PARSE;
+
+	/*
+	 * Find the last colon in the string to test for mixed
+	 * (IPv4-mapped) notation. If the suffix after the last
+	 * colon looks like a dotted-decimal IPv4 address, try
+	 * the mixed-notation parse path.
+	 * See ARCHITECTURE.md §4.1.2.
+	 */
+	for (p = src; *p != '\0'; p++) {
+		if (*p == ':')
+			last_colon = p;
+	}
+
+	/*
+	 * If the suffix after the last colon could be an IPv4
+	 * address, attempt mixed-notation parse. This covers
+	 * ::ffff:192.0.2.1 (accepted) and ::192.0.2.1 (rejected
+	 * by the prefix check below).
+	 */
+	if (last_colon != NULL && is_mixed_suffix(last_colon + 1)) {
+		uint8_t ipv4_octets[4];
+		const char *ipv4_src = last_colon + 1;
+
+		if (ipv4_suffix_parse(ipv4_src, ipv4_octets) != CIDR_OK)
+			return CIDR_ERR_PARSE;
+
+		const char *hex_end;
+
+		/*
+		 * The hex part is everything before the last colon.
+		 * If the last colon is the second colon of :: (as in
+		 * ::192.0.2.1), the hex part is just ":" (one colon).
+		 * We handle this degeneracy below.
+		 */
+		hex_end = last_colon;
+		max_groups = 6;
+
+		/* Parse the hex prefix, bounded by hex_end. */
+		p = src;
+		has_cc = false;
+		before_count = 0;
+		after_count = 0;
+
+		while (p < hex_end) {
+			int digit_count = 0;
+			uint16_t value = 0;
+
+			/*
+			 * Check for :: at current position.
+			 * If the second colon would be at or past
+			 * hex_end, treat the lone ':' as a
+			 * degenerate :: that spans the boundary.
+			 * See ARCHITECTURE.md §4.1.2.
+			 */
+			if (*p == ':') {
+				if (p + 1 < hex_end && *(p + 1) == ':') {
+					if (has_cc)
+						return CIDR_ERR_PARSE;
+					has_cc = true;
+					p += 2;
+					continue;
+				}
+				/*
+				 * Lone colon at the end of the hex part:
+				 * the :: straddles the hex/IPv4 boundary.
+				 * This is the degenerate case like
+				 * ::192.0.2.1 where the IPv4 suffix
+				 * follows :: directly.
+				 */
+				if (p + 1 == hex_end) {
+					if (has_cc)
+						return CIDR_ERR_PARSE;
+					has_cc = true;
+					p++;
+					continue;
+				}
+				return CIDR_ERR_PARSE;
+			}
+
+			/* Parse 1-4 hex digits. */
+			while (p < hex_end) {
+				int dig;
+
+				dig = hex_val(*p);
+				if (dig < 0)
+					break;
+				value = (uint16_t)(value * 16 + (uint16_t)dig);
+				digit_count++;
+				p++;
+			}
+			if (digit_count < 1 || digit_count > 4)
+				return CIDR_ERR_PARSE;
+
+			if (has_cc) {
+				if (after_count >= max_groups)
+					return CIDR_ERR_PARSE;
+				after[after_count++] = value;
+			} else {
+				if (before_count >= max_groups)
+					return CIDR_ERR_PARSE;
+				before[before_count++] = value;
+			}
+
+			/*
+			 * Separator or end of hex part.
+			 * If the colon is part of :: (next char is also ':'
+			 * and within the hex part), do not consume it; the
+			 * top of loop will detect ::. Also skip consumption
+			 * when :: straddles the hex boundary.
+			 */
+			if (p >= hex_end)
+				break;
+			if (*p != ':')
+				return CIDR_ERR_PARSE;
+			if (p + 1 < hex_end && *(p + 1) == ':')
+				continue;
+			if (p + 1 == hex_end)
+				continue;
+			p++;
+		}
+
+		total_explicit = before_count + after_count;
+
+		if (!has_cc) {
+			if (total_explicit != max_groups)
+				return CIDR_ERR_PARSE;
+		} else {
+			/*
+			 * SAFETY: :: must expand to at least one zero group.
+			 * If explicit groups already equal max_groups, there
+			 * is no room for expansion -- reject.
+			 */
+			if (total_explicit >= max_groups)
+				return CIDR_ERR_PARSE;
+		}
+		zero_groups = max_groups - total_explicit;
+
+		/*
+		 * Build the first 12 address bytes from hex groups
+		 * in network byte order (big-endian per group).
+		 * See ARCHITECTURE.md §3.2.
+		 */
+		byte_idx = 0;
+		for (i = 0; i < before_count; i++) {
+			out->addr.v6[byte_idx++] = (uint8_t)(before[i] >> 8);
+			out->addr.v6[byte_idx++] = (uint8_t)(before[i] & 0xFF);
+		}
+		for (i = 0; i < zero_groups; i++) {
+			out->addr.v6[byte_idx++] = 0;
+			out->addr.v6[byte_idx++] = 0;
+		}
+		for (i = 0; i < after_count; i++) {
+			out->addr.v6[byte_idx++] = (uint8_t)(after[i] >> 8);
+			out->addr.v6[byte_idx++] = (uint8_t)(after[i] & 0xFF);
+		}
+
+		/* Append the IPv4 suffix bytes (octets 12-15). */
+		out->addr.v6[12] = ipv4_octets[0];
+		out->addr.v6[13] = ipv4_octets[1];
+		out->addr.v6[14] = ipv4_octets[2];
+		out->addr.v6[15] = ipv4_octets[3];
+
+		/*
+		 * SAFETY: verify the IPv4-mapped prefix.
+		 * First 10 bytes must be zero, bytes 10-11 must be
+		 * 0xFF 0xFF. This rejects non-mapped mixed notation
+		 * (e.g. 2001:db8::192.0.2.1) and IPv4-compatible
+		 * addresses (e.g. ::192.0.2.1).
+		 * See ARCHITECTURE.md §4.1.2, RFC 5952 §5,
+		 * RFC 4291 §2.5.5.1.
+		 */
+		for (i = 0; i < 10; i++) {
+			if (out->addr.v6[i] != 0)
+				return CIDR_ERR_PARSE;
+		}
+		if (out->addr.v6[10] != 0xFF || out->addr.v6[11] != 0xFF)
+			return CIDR_ERR_PARSE;
+
+		out->family = CIDR_AF_INET6;
+		return CIDR_OK;
+	}
+
+	/*
+	 * Pure IPv6 path (full or compressed form).
+	 * Parse up to 8 hex groups, with :: appearing at most once.
+	 * See ARCHITECTURE.md §4.1.2.
+	 */
+	max_groups = 8;
+	p = src;
+	has_cc = false;
+	before_count = 0;
+	after_count = 0;
+
+	while (*p != '\0') {
+		int digit_count = 0;
+		uint16_t value = 0;
+
+		/* Detect :: token. */
+		if (*p == ':' && *(p + 1) == ':') {
+			if (has_cc)
+				return CIDR_ERR_PARSE;
+			has_cc = true;
+			p += 2;
+			continue;
+		}
+
+		/* Parse 1-4 hex digits. */
+		while (*p != '\0') {
+			int dig;
+
+			dig = hex_val(*p);
+			if (dig < 0)
+				break;
+			value = (uint16_t)(value * 16 + (uint16_t)dig);
+			digit_count++;
+			p++;
+		}
+		if (digit_count < 1 || digit_count > 4)
+			return CIDR_ERR_PARSE;
+
+		if (has_cc) {
+			if (after_count >= max_groups)
+				return CIDR_ERR_PARSE;
+			after[after_count++] = value;
+		} else {
+			if (before_count >= max_groups)
+				return CIDR_ERR_PARSE;
+			before[before_count++] = value;
+		}
+
+		/*
+		 * Expect separator, ::, or end of string.
+		 * If the colon is part of :: (next char is also ':'),
+		 * do not consume it; the top of loop will detect ::.
+		 */
+		if (*p == ':') {
+			if (*(p + 1) != ':') {
+				p++;
+				if (*p == '\0')
+					break;
+			}
+			continue;
+		}
+		if (*p == '\0')
+			break;
+		return CIDR_ERR_PARSE;
+	}
+
+	total_explicit = before_count + after_count;
+
+	/*
+	 * SAFETY: validate group count.
+	 * Without :: : exactly 8 groups.
+	 * With ::    : explicit groups must be strictly less than 8;
+	 *              :: expands to at least one zero group.
+	 * See ARCHITECTURE.md §4.1.2.
+	 */
+	if (!has_cc) {
+		if (total_explicit != 8)
+			return CIDR_ERR_PARSE;
+	} else {
+		if (total_explicit >= 8)
+			return CIDR_ERR_PARSE;
+	}
+	zero_groups = 8 - total_explicit;
+
+	/*
+	 * Build 16 address bytes in network byte order.
+	 * See ARCHITECTURE.md §3.2.
+	 */
+	byte_idx = 0;
+	for (i = 0; i < before_count; i++) {
+		out->addr.v6[byte_idx++] = (uint8_t)(before[i] >> 8);
+		out->addr.v6[byte_idx++] = (uint8_t)(before[i] & 0xFF);
+	}
+	for (i = 0; i < zero_groups; i++) {
+		out->addr.v6[byte_idx++] = 0;
+		out->addr.v6[byte_idx++] = 0;
+	}
+	for (i = 0; i < after_count; i++) {
+		out->addr.v6[byte_idx++] = (uint8_t)(after[i] >> 8);
+		out->addr.v6[byte_idx++] = (uint8_t)(after[i] & 0xFF);
+	}
+
+	out->family = CIDR_AF_INET6;
+	return CIDR_OK;
+}
+
+/*
  * cidr_addr_parse - parse an IPv4 or IPv6 address from text.
  *
- * Dispatches based on input text: strings containing ':' are treated
- * as IPv6 (handled in a later phase; returns CIDR_ERR_PARSE for now);
- * all other input is parsed as strict dotted-decimal IPv4.
+ * Dispatches based on input text: strings containing ':' are
+ * treated as IPv6 per ARCHITECTURE.md §4.1.2; all other input
+ * is parsed as strict dotted-decimal IPv4 per §4.1.1.
+ *
+ * IPv6 accepts full (8-group), compressed (:: once), and mixed
+ * (IPv4-mapped only) forms. IPv4-compatible addresses are
+ * rejected per RFC 4291 §2.5.5.1 deprecation. Non-mapped mixed
+ * notation is rejected per RFC 5952 §5.
  *
  * src:  null-terminated address string
- * out:  caller-provided cidr_addr_t; on failure out->family is written
- *       as CIDR_AF_UNSPEC so the caller can detect failure by
- *       inspecting the output even after discarding the return code
+ * out:  caller-provided cidr_addr_t; on failure out->family is
+ *       written as CIDR_AF_UNSPEC so the caller can detect
+ *       failure by inspecting the output even after discarding
+ *       the return code
  *
- * Returns CIDR_OK on success (out->family = CIDR_AF_INET, IPv4 bytes
- * in network byte order).
+ * Returns CIDR_OK on success (out->family set to CIDR_AF_INET
+ * or CIDR_AF_INET6, address bytes in network byte order).
  * Returns CIDR_ERR_INVAL if src or out is NULL.
- * Returns CIDR_ERR_PARSE if the text does not match a valid IPv4
- * address form (or is an IPv6 form not yet implemented).
+ * Returns CIDR_ERR_PARSE if the text does not match a valid
+ * address form for either family.
  *
- * See ARCHITECTURE.md §4.1.1 for IPv4 parsing rejection cases.
+ * See ARCHITECTURE.md §4.1.1 and §4.1.2.
  */
 cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
 {
@@ -125,15 +560,15 @@ cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
 		return CIDR_ERR_INVAL;
 
 	/*
-	 * IPv6 dispatch: if the input contains a colon, it is an
-	 * attempted IPv6 address. IPv6 parsing is implemented in a
-	 * later phase; return CIDR_ERR_PARSE for now.
-	 * See ARCHITECTURE.md §4.1.2.
+	 * IPv6 dispatch: if the input contains a colon, delegate
+	 * to the IPv6 parser. See ARCHITECTURE.md §4.1.2.
 	 */
 	for (p = src; *p != '\0'; p++) {
 		if (*p == ':') {
-			out->family = CIDR_AF_UNSPEC;
-			return CIDR_ERR_PARSE;
+			rc = addr_parse_ipv6(src, out);
+			if (rc != CIDR_OK)
+				out->family = CIDR_AF_UNSPEC;
+			return rc;
 		}
 	}
 

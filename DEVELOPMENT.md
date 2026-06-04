@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 2 - Address Arithmetic Engine
-**Next Task**: Phase 2.2 -- IPv4 parsing
+**Next Task**: Phase 2.4 -- IPv4 and IPv6 formatting
 
 ### Phase Summary
 
@@ -204,7 +204,7 @@ targets.
 - No `sscanf`, no `strtol` with base 8 fallback -- implement a strict
   decimal-only octet parser
 
-**2.3 -- IPv6 parsing**
+**2.3 -- IPv6 parsing** ✓ DONE
 - Implement the IPv6 path of `cidr_addr_parse()` in `src/cidr_addr.c`
 - Accept all three forms defined in RFC 4291 §2.2: full 8-group, compressed
   (`::` once), and mixed notation for IPv4-mapped (`::ffff:0:0/96`) only
