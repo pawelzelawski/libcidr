@@ -14,6 +14,7 @@ extern int test_ipv4_parse_leading_zero(void);
 extern int test_ipv4_parse_hex(void);
 extern int test_ipv4_parse_out_of_range(void);
 extern int test_ipv4_parse_wrong_count(void);
+extern int test_ipv4_parse_empty(void);
 extern int test_ipv4_parse_whitespace(void);
 extern int test_ipv4_parse_trailing_chars(void);
 extern int test_ipv4_parse_null(void);
@@ -53,6 +54,7 @@ int main(void)
 	RUN("test_ipv4_parse_hex", test_ipv4_parse_hex);
 	RUN("test_ipv4_parse_out_of_range", test_ipv4_parse_out_of_range);
 	RUN("test_ipv4_parse_wrong_count", test_ipv4_parse_wrong_count);
+	RUN("test_ipv4_parse_empty", test_ipv4_parse_empty);
 	RUN("test_ipv4_parse_whitespace", test_ipv4_parse_whitespace);
 	RUN("test_ipv4_parse_trailing_chars", test_ipv4_parse_trailing_chars);
 	RUN("test_ipv4_parse_null", test_ipv4_parse_null);

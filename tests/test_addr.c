@@ -134,6 +134,20 @@ int test_ipv4_parse_wrong_count(void)
 }
 
 /*
+ * test_ipv4_parse_empty - reject empty string per TESTING.md §3.1.
+ * An empty string has zero octets -- below the minimum of four.
+ */
+int test_ipv4_parse_empty(void)
+{
+	cidr_addr_t out;
+
+	if (cidr_addr_parse("", &out) != CIDR_ERR_PARSE)
+		return 1;
+
+	return 0;
+}
+
+/*
  * test_ipv4_parse_whitespace - reject leading and trailing whitespace
  * per TESTING.md §3.1.
  */
@@ -590,9 +604,9 @@ int test_ipv6_format_rfc5952_no_compress_single(void)
 	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
 		return 1;
 	/*
-	 * The zero group at position 2 is a single zero:
-	 * the run of length 5 at positions 3-7 is compressed,
-	 * but the single zero at position 2 stays as "0".
+	 * groups = [0x2001, 0x0db8, 0, 1, 0, 0, 0, 1].
+	 * Longest zero run is at positions 4-6, length 3 -- compressed.
+	 * Single zero at position 2 stays as "0" per RFC 5952 §4.2.2.
 	 * Expected: 2001:db8:0:1::1
 	 */
 	if (strcmp(buf, "2001:db8:0:1::1") != 0)
@@ -752,6 +766,15 @@ int test_addr_format_buffer_too_small(void)
 	if (cidr_addr_format(NULL, small_buf, CIDR_ADDR_STR_MAX) !=
 	    CIDR_ERR_INVAL)
 		return 1;
+
+	/* CIDR_AF_UNSPEC: must return CIDR_ERR_INVAL per ARCHITECTURE.md §4.2.1 */
+	{
+		cidr_addr_t unspec = {0};
+		char buf2[CIDR_ADDR_STR_MAX];
+
+		if (cidr_addr_format(&unspec, buf2, sizeof(buf2)) != CIDR_ERR_INVAL)
+			return 1;
+	}
 
 	return 0;
 }

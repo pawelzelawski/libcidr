@@ -14,7 +14,8 @@
  * hex_val - convert a hex digit character to its integer value.
  * Returns -1 if the character is not a valid hex digit.
  */
-static int hex_val(int c)
+static int
+hex_val(int c)
 {
 	if (c >= '0' && c <= '9')
 		return c - '0';
@@ -45,10 +46,12 @@ static int hex_val(int c)
  *
  * See ARCHITECTURE.md §4.1.1 for the full rejection case table.
  */
-static cidr_err_t addr_parse_ipv4(const char *src, cidr_addr_t *out)
+static cidr_err_t
+addr_parse_ipv4(const char *src, cidr_addr_t *out)
     __attribute__((warn_unused_result));
 
-static cidr_err_t addr_parse_ipv4(const char *src, cidr_addr_t *out)
+static cidr_err_t
+addr_parse_ipv4(const char *src, cidr_addr_t *out)
 {
 	const char *p = src;
 	int octet_count = 0;
@@ -126,7 +129,12 @@ static cidr_err_t addr_parse_ipv4(const char *src, cidr_addr_t *out)
  * Returns CIDR_OK on success.
  * Returns CIDR_ERR_PARSE on malformed input.
  */
-static cidr_err_t ipv4_suffix_parse(const char *suffix, uint8_t *octets)
+static cidr_err_t
+ipv4_suffix_parse(const char *suffix, uint8_t *octets)
+    __attribute__((warn_unused_result));
+
+static cidr_err_t
+ipv4_suffix_parse(const char *suffix, uint8_t *octets)
 {
 	const char *p = suffix;
 	int octet_count = 0;
@@ -182,7 +190,8 @@ static cidr_err_t ipv4_suffix_parse(const char *suffix, uint8_t *octets)
  * Quick check: must contain at least one '.'. Full validity is
  * verified by ipv4_suffix_parse() which is called afterwards.
  */
-static bool is_mixed_suffix(const char *s)
+static bool
+is_mixed_suffix(const char *s)
 {
 	if (*s == '\0')
 		return false;
@@ -224,10 +233,12 @@ static bool is_mixed_suffix(const char *s)
  *
  * See ARCHITECTURE.md §4.1.2 for the full IPv6 parsing specification.
  */
-static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
+static cidr_err_t
+addr_parse_ipv6(const char *src, cidr_addr_t *out)
     __attribute__((warn_unused_result));
 
-static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
+static cidr_err_t
+addr_parse_ipv6(const char *src, cidr_addr_t *out)
 {
 	const char *p;
 	const char *last_colon = NULL;
@@ -553,7 +564,8 @@ static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
  *
  * See ARCHITECTURE.md §4.1.1 and §4.1.2.
  */
-cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
+cidr_err_t
+cidr_addr_parse(const char *src, cidr_addr_t *out)
 {
 	cidr_err_t rc;
 	const char *p;
@@ -585,7 +597,8 @@ cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
  * into out and return the number of characters written (1-3).
  * No leading zeros. No NUL terminator -- the caller handles it.
  */
-static int uint8_to_dec(uint8_t val, char *out)
+static int
+uint8_to_dec(uint8_t val, char *out)
 {
 	if (val >= 100) {
 		out[0] = (char)('0' + (val / 100));
@@ -608,7 +621,8 @@ static int uint8_to_dec(uint8_t val, char *out)
  * number of characters written (1-4). The value 0 is written as "0".
  * No NUL terminator -- the caller handles it.
  */
-static int uint16_to_hex(uint16_t val, char *out)
+static int
+uint16_to_hex(uint16_t val, char *out)
 {
 	static const char hex_digits[] = "0123456789abcdef";
 	int shift = 12;
@@ -643,7 +657,8 @@ static int uint16_to_hex(uint16_t val, char *out)
  *
  * See ARCHITECTURE.md §4.2.2 rules 2-4.
  */
-static int find_zero_compress(const uint16_t *groups, int *run_len)
+static int
+find_zero_compress(const uint16_t *groups, int *run_len)
 {
 	int best_start = -1;
 	int best_len = 0;
@@ -694,10 +709,12 @@ static int find_zero_compress(const uint16_t *groups, int *run_len)
  *
  * See ARCHITECTURE.md §4.2.1.
  */
-static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
+static cidr_err_t
+addr_format_ipv4(const cidr_addr_t *addr, char *buf)
     __attribute__((warn_unused_result));
 
-static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
+static cidr_err_t
+addr_format_ipv4(const cidr_addr_t *addr, char *buf)
 {
 	int pos = 0;
 
@@ -733,10 +750,12 @@ static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
  *
  * See ARCHITECTURE.md §4.2.2.
  */
-static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
+static cidr_err_t
+addr_format_ipv6(const cidr_addr_t *addr, char *buf)
     __attribute__((warn_unused_result));
 
-static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
+static cidr_err_t
+addr_format_ipv6(const cidr_addr_t *addr, char *buf)
 {
 	uint16_t groups[8];
 	int pos = 0;
@@ -834,7 +853,8 @@ static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
  *
  * See ARCHITECTURE.md §4.2.
  */
-cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
+cidr_err_t
+cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
 {
 	/*
 	 * SAFETY: buffer size check before any write. CIDR_ADDR_STR_MAX (46)
@@ -879,7 +899,8 @@ cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
  *
  * See ARCHITECTURE.md §4.1.3.
  */
-cidr_err_t cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
+cidr_err_t
+cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
 {
 	int i;
 
@@ -946,8 +967,8 @@ cidr_err_t cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
  *
  * See ARCHITECTURE.md §4.4.
  */
-cidr_err_t cidr_addr_cmp(const cidr_addr_t *a, const cidr_addr_t *b,
-                         int *result)
+cidr_err_t
+cidr_addr_cmp(const cidr_addr_t *a, const cidr_addr_t *b, int *result)
 {
 	int cmp;
 

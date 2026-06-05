@@ -137,7 +137,9 @@ typedef struct cidr_index cidr_index_t;
  * Accepts strict dotted-decimal notation for IPv4 per ARCHITECTURE.md §4.1.1:
  * exactly four decimal octets 0-255 separated by dots, no leading zeros,
  * no hex, no whitespace, no trailing characters.
- * IPv6 parsing per ARCHITECTURE.md §4.1.2 is implemented in a later phase.
+ * Accepts full, compressed, and IPv4-mapped mixed forms for IPv6 per
+ * RFC 4291 §2.2 and RFC 5952 §5. IPv4-compatible addresses are rejected
+ * per RFC 4291 §2.5.5.1 deprecation. See ARCHITECTURE.md §4.1.2.
  *
  * src:  null-terminated address string
  * out:  caller-provided cidr_addr_t; written with CIDR_AF_INET on success,

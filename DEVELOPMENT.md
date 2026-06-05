@@ -271,6 +271,8 @@ Per TESTING.md §3, every RFC conformance test case has its own named test:
 - `test_ipv6_parse_mixed_non_mapped` -- CIDR_ERR_PARSE
 - `test_ipv6_parse_compatible_rejected` -- CIDR_ERR_PARSE
 - `test_ipv6_parse_wrong_group_count` -- CIDR_ERR_PARSE
+- `test_ipv6_parse_group_too_large` -- 16-bit hex group overflow
+- `test_ipv6_parse_invalid_chars` -- non-hex characters, stray colons
 - `test_ipv4_format_canonical` -- no leading zeros, correct separators
 - `test_ipv4_format_roundtrip` -- parse/format/parse produces identical bytes
 - `test_ipv6_format_rfc5952_leading_zeros` -- suppressed per §4.1

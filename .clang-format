@@ -5,3 +5,4 @@ BreakBeforeBraces: Linux
 ColumnLimit: 80
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
+AlwaysBreakAfterReturnType: AllDefinitions
