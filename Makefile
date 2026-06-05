@@ -245,6 +245,7 @@ lint:
 	             --suppress=unusedFunction			\
 	             --suppress=checkersReport			\
 	             --suppress=staticFunction			\
+	             --suppress=unmatchedSuppression		\
 	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \
