@@ -5,8 +5,9 @@
  * cidr_bulk_aggregate(), and cidr_bulk_sort(). Contains the shared
  * in-place MSD radix sort engine.
  *
- * cidr_bulk_parse() is implemented in this phase. See ARCHITECTURE.md §5.2
- * for the batch parse specification and return-code precedence.
+ * cidr_bulk_parse() and cidr_bulk_contains() are implemented in this
+ * phase. See ARCHITECTURE.md §5.2 for batch parse and §5.3 for bulk
+ * containment.
  * See ARCHITECTURE.md §5 for the bulk engine specification.
  */
 
@@ -339,5 +340,132 @@ cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
 		return CIDR_ERR_FAMILY;
 	if (has_parse_failure)
 		return CIDR_ERR_PARSE;
+	return CIDR_OK;
+}
+
+/*
+ * cidr_bulk_contains - bulk containment: find first matching prefix for
+ *                       each address.
+ *
+ * For each address in addrs, scans prefixes in order and writes the index
+ * of the first matching prefix into matches[i], or -1 if no prefix matched.
+ * Match is first-match-in-order. Callers needing longest-prefix-match
+ * semantics sort prefixes by CIDR_SORT_PFXLEN_DESC before calling.
+ *
+ * When prefix_count == 0, all matches[i] are written as -1 and the function
+ * returns CIDR_OK.
+ *
+ * addrs:        array of addr_count addresses to test
+ * addr_count:   number of entries in addrs and matches
+ * prefixes:     array of prefix_count prefixes to scan for each address
+ * prefix_count: number of entries in prefixes
+ * matches:      caller-provided ssize_t array; on success, each entry is
+ *               the index of the first matching prefix, or -1 for no match
+ * errs:         optional per-item error array (may be NULL); when non-NULL,
+ *               each entry is set to CIDR_OK
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addrs or matches is NULL when addr_count > 0,
+ *   if prefixes is NULL when prefix_count > 0, or if any address or prefix
+ *   has family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the address array or prefix array contains
+ *   mixed families, or if the address family does not match the prefix
+ *   family.
+ *
+ * When addr_count == 0, returns CIDR_OK with no work performed per the
+ * empty array policy (ARCHITECTURE.md §3.4).
+ *
+ * Complexity: O(addr_count * prefix_count).
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.3 for the bulk containment specification.
+ */
+cidr_err_t
+cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
+                   const cidr_prefix_t *prefixes, size_t prefix_count,
+                   ssize_t *matches, cidr_err_t *errs)
+{
+	cidr_family_t addr_family;
+	cidr_family_t pfx_family;
+	size_t i, j;
+
+	/* Empty array policy. See ARCHITECTURE.md §3.4. */
+	if (addr_count == 0)
+		return CIDR_OK;
+
+	/* Validate mandatory pointers when addr_count > 0 */
+	if (addrs == NULL || matches == NULL)
+		return CIDR_ERR_INVAL;
+
+	/*
+	 * Handle empty prefix table: all addresses have no match.
+	 * See ARCHITECTURE.md §5.3.
+	 */
+	if (prefix_count == 0) {
+		for (i = 0; i < addr_count; i++)
+			matches[i] = -1;
+		return CIDR_OK;
+	}
+
+	/* Prefixes pointer must be valid when prefix_count > 0 */
+	if (prefixes == NULL)
+		return CIDR_ERR_INVAL;
+
+	/*
+	 * Validate address array family consistency.
+	 * SAFETY: all addresses must share the same valid family before
+	 * scanning begins. See ARCHITECTURE.md §3.1 CIDR_AF_UNSPEC policy.
+	 */
+	addr_family = addrs[0].family;
+	if (addr_family != CIDR_AF_INET && addr_family != CIDR_AF_INET6)
+		return CIDR_ERR_INVAL;
+	for (i = 1; i < addr_count; i++) {
+		if (addrs[i].family == CIDR_AF_UNSPEC)
+			return CIDR_ERR_INVAL;
+		if (addrs[i].family != addr_family)
+			return CIDR_ERR_FAMILY;
+	}
+
+	/*
+	 * Validate prefix array family consistency.
+	 * SAFETY: all prefixes must share the same valid family.
+	 */
+	pfx_family = prefixes[0].addr.family;
+	if (pfx_family != CIDR_AF_INET && pfx_family != CIDR_AF_INET6)
+		return CIDR_ERR_INVAL;
+	for (i = 1; i < prefix_count; i++) {
+		if (prefixes[i].addr.family == CIDR_AF_UNSPEC)
+			return CIDR_ERR_INVAL;
+		if (prefixes[i].addr.family != pfx_family)
+			return CIDR_ERR_FAMILY;
+	}
+
+	/* Address and prefix families must match */
+	if (addr_family != pfx_family)
+		return CIDR_ERR_FAMILY;
+
+	/*
+	 * For each address, scan prefixes in order. First match wins.
+	 * See ARCHITECTURE.md §5.3.
+	 */
+	for (i = 0; i < addr_count; i++) {
+		ssize_t match = -1;
+
+		for (j = 0; j < prefix_count; j++) {
+			bool contained;
+
+			if (cidr_prefix_contains(&prefixes[j], &addrs[i],
+			                         &contained) == CIDR_OK &&
+			    contained) {
+				match = (ssize_t)j;
+				break;
+			}
+		}
+
+		matches[i] = match;
+		if (errs != NULL)
+			errs[i] = CIDR_OK;
+	}
+
 	return CIDR_OK;
 }

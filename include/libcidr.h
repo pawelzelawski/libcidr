@@ -647,4 +647,44 @@ cidr_err_t cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
                            cidr_err_t *errs)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_bulk_contains - bulk containment: find first matching prefix for
+ *                      each address.
+ *
+ * For each address in addrs, scans prefixes in order and writes the index
+ * of the first matching prefix into matches[i], or -1 if no prefix matched.
+ * Match is first-match-in-order. Callers needing longest-prefix-match
+ * semantics should sort prefixes by CIDR_SORT_PFXLEN_DESC via
+ * cidr_bulk_sort() before calling.
+ *
+ * When prefix_count == 0, all matches[i] are written as -1 and the function
+ * returns CIDR_OK. When addr_count == 0, returns CIDR_OK with no work.
+ *
+ * addrs:        array of addr_count addresses to test
+ * addr_count:   number of entries in addrs and matches
+ * prefixes:     array of prefix_count prefixes to scan per address
+ * prefix_count: number of entries in prefixes
+ * matches:      caller-provided ssize_t array; receives match index or -1
+ * errs:         optional per-item error array (may be NULL); when non-NULL,
+ *               each entry is set to CIDR_OK
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addrs or matches is NULL when addr_count > 0,
+ *   if prefixes is NULL when prefix_count > 0, or if any address or prefix
+ *   has family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the address array or prefix array contains
+ *   mixed families, or if the address family does not match the prefix
+ *   family.
+ *
+ * Complexity: O(addr_count * prefix_count).
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.3 for the bulk containment specification.
+ */
+cidr_err_t cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
+                              const cidr_prefix_t *prefixes,
+                              size_t prefix_count, ssize_t *matches,
+                              cidr_err_t *errs)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 4 -- Bulk Engine (IN PROGRESS)
-**Next Task**: Phase 4.3 -- cidr_bulk_contains()
+**Next Task**: Phase 4.4 -- cidr_bulk_aggregate()
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
-| 4 | Bulk Engine | IN PROGRESS | 18/18 | Batch parse, containment, aggregation, sort |
+| 4 | Bulk Engine | IN PROGRESS | 24/24 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
@@ -505,7 +505,7 @@ cases at count boundaries are handled.
 - Write `CIDR_AF_UNSPEC` to `out[i].family` for failed items
 - `errs` may be NULL; skip per-item error writes when NULL
 
-**4.3 -- `cidr_bulk_contains()`**
+**4.3 -- `cidr_bulk_contains()`** ✓ DONE
 - Implement per ARCHITECTURE.md §5.3
 - For each `addrs[i]`, scan `prefixes` in order, write index of first match
   or -1

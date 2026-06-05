@@ -228,6 +228,203 @@ test_bulk_parse_full_batch_all_attempted(void)
 }
 
 /*
+ * test_bulk_contains_first_match -- first matching prefix returned; later
+ * matching prefixes ignored.
+ */
+int
+test_bulk_contains_first_match(void)
+{
+	cidr_prefix_t prefixes[3];
+	cidr_addr_t addrs[3];
+	ssize_t matches[3];
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("192.168.0.0/16", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.1.0.0/16", &prefixes[2]) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_parse("10.1.1.1", &addrs[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("192.168.1.1", &addrs[1]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("172.16.0.1", &addrs[2]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 3, prefixes, 3, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+
+	/* 10.1.1.1 matches 10.0.0.0/8 (index 0) -- first in order */
+	if (matches[0] != 0)
+		return 1;
+	/* 192.168.1.1 matches 192.168.0.0/16 (index 1) */
+	if (matches[1] != 1)
+		return 1;
+	/* 172.16.0.1 matches nothing */
+	if (matches[2] != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_no_match -- address not in any prefix returns -1.
+ */
+int
+test_bulk_contains_no_match(void)
+{
+	cidr_prefix_t prefixes[1];
+	cidr_addr_t addrs[1];
+	ssize_t matches[1];
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("192.168.1.1", &addrs[0]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 1, prefixes, 1, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+	if (matches[0] != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_lpm_with_sorted_table -- after sorting by
+ * CIDR_SORT_PFXLEN_DESC, the first match is the most specific prefix.
+ * See ARCHITECTURE.md §5.3, §5.5.
+ */
+int
+test_bulk_contains_lpm_with_sorted_table(void)
+{
+	cidr_prefix_t prefixes[4];
+	cidr_addr_t addrs[4];
+	ssize_t matches[4];
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.1.0.0/16", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.1.2.0/24", &prefixes[2]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("192.168.0.0/16", &prefixes[3]) != CIDR_OK)
+		return 1;
+
+	/* Sort by prefix length descending for LPM preparation */
+	rc = cidr_bulk_sort(prefixes, 4, CIDR_SORT_PFXLEN_DESC);
+	if (rc != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_parse("10.1.2.5", &addrs[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("10.1.1.1", &addrs[1]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("10.2.0.1", &addrs[2]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("172.16.0.1", &addrs[3]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 4, prefixes, 4, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+
+	/* All addresses except 172.16.0.1 must find a match */
+	if (matches[0] < 0 || matches[1] < 0 || matches[2] < 0)
+		return 1;
+	if (matches[3] != -1)
+		return 1;
+
+	/*
+	 * With CIDR_SORT_PFXLEN_DESC, longer prefixes sort first.
+	 * The matched prefix's pfxlen must be the most specific match.
+	 */
+	/* 10.1.2.5 matches /24 */
+	if (prefixes[matches[0]].pfxlen != 24)
+		return 1;
+	/* 10.1.1.1 matches /16 (no /24 covers it) */
+	if (prefixes[matches[1]].pfxlen != 16)
+		return 1;
+	/* 10.2.0.1 matches /8 (only /8 covers it) */
+	if (prefixes[matches[2]].pfxlen != 8)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_empty_prefix_table -- when prefix_count == 0, all
+ * matches are -1 and CIDR_OK is returned. See ARCHITECTURE.md §5.3.
+ */
+int
+test_bulk_contains_empty_prefix_table(void)
+{
+	cidr_addr_t addrs[2];
+	ssize_t matches[2];
+	cidr_err_t rc;
+
+	if (cidr_addr_parse("10.0.0.1", &addrs[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("192.168.1.1", &addrs[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 2, NULL, 0, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+	if (matches[0] != -1 || matches[1] != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_null_matches_nonzero_count -- when addr_count > 0 and
+ * matches is NULL, CIDR_ERR_INVAL is returned. See ARCHITECTURE.md §5.3.
+ */
+int
+test_bulk_contains_null_matches_nonzero_count(void)
+{
+	cidr_addr_t addrs[1];
+
+	if (cidr_addr_parse("10.0.0.1", &addrs[0]) != CIDR_OK)
+		return 1;
+
+	if (cidr_bulk_contains(addrs, 1, NULL, 0, NULL, NULL) != CIDR_ERR_INVAL)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_family_mismatch -- CIDR_ERR_FAMILY when address and
+ * prefix arrays have different families. See ARCHITECTURE.md §5.3.
+ */
+int
+test_bulk_contains_family_mismatch(void)
+{
+	cidr_prefix_t prefixes[1];
+	cidr_addr_t addrs[1];
+	ssize_t matches[1];
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("2001:db8::1", &addrs[0]) != CIDR_OK)
+		return 1;
+
+	if (cidr_bulk_contains(addrs, 1, prefixes, 1, matches, NULL) !=
+	    CIDR_ERR_FAMILY)
+		return 1;
+
+	return 0;
+}
+
+/*
  * test_bulk_sort_empty -- count == 0 returns CIDR_OK without touching
  * the prefixes pointer. See ARCHITECTURE.md §3.4 empty array policy.
  */

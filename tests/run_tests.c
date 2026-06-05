@@ -95,6 +95,12 @@ extern int test_bulk_parse_null_errs(void);
 extern int test_bulk_parse_null_element(void);
 extern int test_bulk_parse_return_code_precedence(void);
 extern int test_bulk_parse_full_batch_all_attempted(void);
+extern int test_bulk_contains_first_match(void);
+extern int test_bulk_contains_no_match(void);
+extern int test_bulk_contains_lpm_with_sorted_table(void);
+extern int test_bulk_contains_empty_prefix_table(void);
+extern int test_bulk_contains_null_matches_nonzero_count(void);
+extern int test_bulk_contains_family_mismatch(void);
 extern int test_bulk_sort_empty(void);
 extern int test_bulk_sort_single(void);
 extern int test_bulk_sort_invalid_order(void);
@@ -218,6 +224,16 @@ main(void)
 	    test_bulk_parse_return_code_precedence);
 	RUN("test_bulk_parse_full_batch_all_attempted",
 	    test_bulk_parse_full_batch_all_attempted);
+	RUN("test_bulk_contains_first_match", test_bulk_contains_first_match);
+	RUN("test_bulk_contains_no_match", test_bulk_contains_no_match);
+	RUN("test_bulk_contains_lpm_with_sorted_table",
+	    test_bulk_contains_lpm_with_sorted_table);
+	RUN("test_bulk_contains_empty_prefix_table",
+	    test_bulk_contains_empty_prefix_table);
+	RUN("test_bulk_contains_null_matches_nonzero_count",
+	    test_bulk_contains_null_matches_nonzero_count);
+	RUN("test_bulk_contains_family_mismatch",
+	    test_bulk_contains_family_mismatch);
 	RUN("test_bulk_sort_empty", test_bulk_sort_empty);
 	RUN("test_bulk_sort_single", test_bulk_sort_single);
 	RUN("test_bulk_sort_invalid_order", test_bulk_sort_invalid_order);
