@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 4 -- Bulk Engine (IN PROGRESS)
-**Next Task**: Phase 4.5 -- cidr_bulk_sort()
+**Current Phase**: Phase 4 -- Bulk Engine (COMPLETE)
+**Next Task**: Phase 5.1 -- Classification table
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
-| 4 | Bulk Engine | IN PROGRESS | 31/31 | Batch parse, containment, aggregation, sort |
+| 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
@@ -526,7 +526,7 @@ cases at count boundaries are handled.
 - Operation is in-place; caller must copy the array before calling if
   the original must be preserved
 
-**4.5 -- `cidr_bulk_sort()`**
+**4.5 -- `cidr_bulk_sort()`** ✓ DONE
 - Implement per ARCHITECTURE.md §5.5
 - Validate `order` parameter; return `CIDR_ERR_INVAL` for invalid enum values
 - When `count == 0`, return `CIDR_OK` without accessing `prefixes`
