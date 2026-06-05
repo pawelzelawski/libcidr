@@ -577,3 +577,276 @@ cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
 		out->family = CIDR_AF_UNSPEC;
 	return rc;
 }
+
+/*
+ * uint8_to_dec - write the decimal representation of val (0-255)
+ * into out and return the number of characters written (1-3).
+ * No leading zeros. No NUL terminator -- the caller handles it.
+ */
+static int uint8_to_dec(uint8_t val, char *out)
+{
+	if (val >= 100) {
+		out[0] = (char)('0' + (val / 100));
+		out[1] = (char)('0' + ((val / 10) % 10));
+		out[2] = (char)('0' + (val % 10));
+		return 3;
+	}
+	if (val >= 10) {
+		out[0] = (char)('0' + (val / 10));
+		out[1] = (char)('0' + (val % 10));
+		return 2;
+	}
+	out[0] = (char)('0' + val);
+	return 1;
+}
+
+/*
+ * uint16_to_hex - write the lowercase hexadecimal representation
+ * of val (0-65535) into out without leading zeros and return the
+ * number of characters written (1-4). The value 0 is written as "0".
+ * No NUL terminator -- the caller handles it.
+ */
+static int uint16_to_hex(uint16_t val, char *out)
+{
+	static const char hex_digits[] = "0123456789abcdef";
+	int shift = 12;
+	int pos = 0;
+
+	if (val == 0) {
+		out[0] = '0';
+		return 1;
+	}
+	/* Skip leading zero hex digits (4 bits each, starting at bit 12). */
+	while (shift > 0 && (val >> shift) == 0)
+		shift -= 4;
+	while (shift >= 0) {
+		out[pos++] = hex_digits[(val >> shift) & 0xF];
+		shift -= 4;
+	}
+	return pos;
+}
+
+/*
+ * find_zero_compress - find the best :: compression position in
+ * an array of 8 IPv6 uint16_t groups per RFC 5952.
+ *
+ * Scans groups for the longest consecutive run of zero groups.
+ * Returns the start index of the run and sets *run_len.
+ * Returns -1 and sets *run_len to 0 if no run of length >= 2 exists.
+ *
+ * Rules applied:
+ *   RFC 5952 §4.2.1 -- longest run compressed (:: to maximum extent)
+ *   RFC 5952 §4.2.2 -- single zero group written as "0", not ::
+ *   RFC 5952 §4.2.3 -- first run wins on tie
+ *
+ * See ARCHITECTURE.md §4.2.2 rules 2-4.
+ */
+static int find_zero_compress(const uint16_t *groups, int *run_len)
+{
+	int best_start = -1;
+	int best_len = 0;
+	int curr_start = -1;
+	int curr_len = 0;
+	int i;
+
+	for (i = 0; i < 8; i++) {
+		if (groups[i] == 0) {
+			if (curr_start < 0)
+				curr_start = i;
+			curr_len++;
+		} else {
+			/* Strict greater -- first run wins on tie
+			 * per RFC 5952 §4.2.3. */
+			if (curr_len > best_len) {
+				best_start = curr_start;
+				best_len = curr_len;
+			}
+			curr_start = -1;
+			curr_len = 0;
+		}
+	}
+	/* Handle trailing zero run. */
+	if (curr_len > best_len) {
+		best_start = curr_start;
+		best_len = curr_len;
+	}
+	/*
+	 * RFC 5952 §4.2.2: do not compress a single zero group.
+	 * A run of length 0 or 1 is not eligible for :: compression.
+	 */
+	if (best_len < 2) {
+		*run_len = 0;
+		return -1;
+	}
+	*run_len = best_len;
+	return best_start;
+}
+
+/*
+ * addr_format_ipv4 - format an IPv4 address as canonical dotted-decimal.
+ *
+ * Writes four decimal octets separated by dots into buf. No leading
+ * zeros, no alternative notations.
+ *
+ * buf must be at least CIDR_ADDR_STR_MAX bytes (validated by caller).
+ *
+ * See ARCHITECTURE.md §4.2.1.
+ */
+static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
+    __attribute__((warn_unused_result));
+
+static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
+{
+	int pos = 0;
+
+	pos += uint8_to_dec(addr->addr.v4[0], buf + pos);
+	buf[pos++] = '.';
+	pos += uint8_to_dec(addr->addr.v4[1], buf + pos);
+	buf[pos++] = '.';
+	pos += uint8_to_dec(addr->addr.v4[2], buf + pos);
+	buf[pos++] = '.';
+	pos += uint8_to_dec(addr->addr.v4[3], buf + pos);
+	buf[pos] = '\0';
+	return CIDR_OK;
+}
+
+/*
+ * addr_format_ipv6 - format an IPv6 address in RFC 5952 canonical form.
+ *
+ * Builds 8 uint16_t groups from the 16 address bytes in network byte
+ * order. Checks for IPv4-mapped addresses (::ffff:0:0/96) and formats
+ * them with a dotted-decimal tail per RFC 5952 §5. For all other IPv6
+ * addresses, finds the best :: compression point and formats groups
+ * as colon-separated lowercase hex with leading zeros suppressed.
+ *
+ * Rules applied, per RFC 5952:
+ *   1. Leading zeros suppressed §4.1
+ *   2. :: applied to the longest run of zero groups §4.2.1
+ *   3. :: not used for a single zero group §4.2.2
+ *   4. First run wins on tie §4.2.3
+ *   5. Lowercase hex throughout §4.3
+ *   6. IPv4-mapped addresses use mixed notation §5
+ *
+ * buf must be at least CIDR_ADDR_STR_MAX bytes (validated by caller).
+ *
+ * See ARCHITECTURE.md §4.2.2.
+ */
+static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
+    __attribute__((warn_unused_result));
+
+static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
+{
+	uint16_t groups[8];
+	int pos = 0;
+	int start, len;
+	int i;
+
+	/*
+	 * Build 8 uint16_t groups from 16 address bytes in network
+	 * byte order. See ARCHITECTURE.md §3.2.
+	 */
+	for (i = 0; i < 8; i++)
+		groups[i] = ((uint16_t)addr->addr.v6[(ptrdiff_t)i * 2] << 8) |
+		            addr->addr.v6[(ptrdiff_t)i * 2 + 1];
+
+	/*
+	 * IPv4-mapped address check: ::ffff:0:0/96.
+	 * Groups 0-4 must be zero, group 5 must be 0xFFFF.
+	 * Format as ::ffff:x.x.x.x per RFC 5952 §5.
+	 * See ARCHITECTURE.md §4.2.2 rule 6.
+	 */
+	if (groups[0] == 0 && groups[1] == 0 && groups[2] == 0 &&
+	    groups[3] == 0 && groups[4] == 0 && groups[5] == 0xFFFF) {
+		buf[0] = ':';
+		buf[1] = ':';
+		buf[2] = 'f';
+		buf[3] = 'f';
+		buf[4] = 'f';
+		buf[5] = 'f';
+		buf[6] = ':';
+		pos = 7;
+		pos += uint8_to_dec(addr->addr.v6[12], buf + pos);
+		buf[pos++] = '.';
+		pos += uint8_to_dec(addr->addr.v6[13], buf + pos);
+		buf[pos++] = '.';
+		pos += uint8_to_dec(addr->addr.v6[14], buf + pos);
+		buf[pos++] = '.';
+		pos += uint8_to_dec(addr->addr.v6[15], buf + pos);
+		buf[pos] = '\0';
+		return CIDR_OK;
+	}
+
+	/*
+	 * Find the best :: compression position per RFC 5952 §4.2.1-4.2.3.
+	 * Longest consecutive run of zero groups; first run wins on tie;
+	 * single zero group not compressed.
+	 */
+	start = find_zero_compress(groups, &len);
+
+	if (start < 0) {
+		/* No compression: format all 8 groups with separators. */
+		pos += uint16_to_hex(groups[0], buf + pos);
+		for (i = 1; i < 8; i++) {
+			buf[pos++] = ':';
+			pos += uint16_to_hex(groups[i], buf + pos);
+		}
+	} else {
+		/* Groups before ::. */
+		for (i = 0; i < start; i++) {
+			pos += uint16_to_hex(groups[i], buf + pos);
+			buf[pos++] = ':';
+		}
+		/* :: itself. */
+		if (start == 0)
+			buf[pos++] = ':';
+		buf[pos++] = ':';
+		/* Groups after ::. */
+		for (i = start + len; i < 8; i++) {
+			pos += uint16_to_hex(groups[i], buf + pos);
+			if (i < 7)
+				buf[pos++] = ':';
+		}
+	}
+
+	buf[pos] = '\0';
+	return CIDR_OK;
+}
+
+/*
+ * cidr_addr_format - format an address as canonical text.
+ *
+ * Writes the canonical text representation of addr into the caller-provided
+ * buffer buf of length len. Dispatches to addr_format_ipv4() for
+ * CIDR_AF_INET and addr_format_ipv6() for CIDR_AF_INET6.
+ *
+ * addr: pointer to a valid cidr_addr_t
+ * buf:  caller-provided output buffer
+ * len:  size of buf in bytes; must be at least CIDR_ADDR_STR_MAX
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addr or buf is NULL, if addr->family is
+ * CIDR_AF_UNSPEC, or if len < CIDR_ADDR_STR_MAX.
+ *
+ * On failure, buf content is undefined.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.2.
+ */
+cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
+{
+	/*
+	 * SAFETY: buffer size check before any write. CIDR_ADDR_STR_MAX (46)
+	 * accommodates the longest possible IPv6 canonical form including
+	 * NUL terminator. See ARCHITECTURE.md §4.2.
+	 */
+	if (addr == NULL || buf == NULL)
+		return CIDR_ERR_INVAL;
+	if (addr->family == CIDR_AF_UNSPEC)
+		return CIDR_ERR_INVAL;
+	if (len < CIDR_ADDR_STR_MAX)
+		return CIDR_ERR_INVAL;
+
+	if (addr->family == CIDR_AF_INET)
+		return addr_format_ipv4(addr, buf);
+	return addr_format_ipv6(addr, buf);
+}

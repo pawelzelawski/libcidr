@@ -215,7 +215,7 @@ targets.
   prefix (`00 00 00 00 00 00 00 00 00 00 FF FF`) per RFC 5952 §5; reject all
   other mixed-notation input with `CIDR_ERR_PARSE`
 
-**2.4 -- IPv4 and IPv6 formatting**
+**2.4 -- IPv4 and IPv6 formatting** ✓ DONE
 - Implement `cidr_addr_format()` in `src/cidr_addr.c`
 - IPv4: canonical dotted-decimal, no leading zeros, no alternative notations
 - IPv6: RFC 5952 canonical form, all six rules in order:

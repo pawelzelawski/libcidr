@@ -447,3 +447,311 @@ int test_ipv6_parse_invalid_chars(void)
 
 	return 0;
 }
+
+/*
+ * test_ipv4_format_canonical - verify IPv4 formatting produces
+ * correct dotted-decimal with no leading zeros.
+ * See TESTING.md §3.3, ARCHITECTURE.md §4.2.1.
+ */
+int test_ipv4_format_canonical(void)
+{
+	static const struct {
+		const char *input;
+		const char *expected;
+	} cases[] = {
+	    {"192.168.1.1", "192.168.1.1"},
+	    {"0.0.0.0", "0.0.0.0"},
+	    {"255.255.255.255", "255.255.255.255"},
+	    {"10.0.0.1", "10.0.0.1"},
+	    {"127.0.0.1", "127.0.0.1"},
+	    {"1.1.1.1", "1.1.1.1"},
+	    {"172.16.0.1", "172.16.0.1"},
+	    {"8.8.8.8", "8.8.8.8"},
+	    {"224.0.0.1", "224.0.0.1"},
+	};
+	const int ncases = sizeof(cases) / sizeof(cases[0]);
+	char buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr;
+	int i;
+
+	for (i = 0; i < ncases; i++) {
+		if (cidr_addr_parse(cases[i].input, &addr) != CIDR_OK)
+			return 1;
+		if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+			return 1;
+		if (strcmp(buf, cases[i].expected) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * test_ipv4_format_roundtrip - verify parse/format/parse produces
+ * bit-identical bytes. See TESTING.md §6.1.
+ */
+int test_ipv4_format_roundtrip(void)
+{
+	static const char *cases[] = {
+	    "192.168.1.1", "0.0.0.0", "255.255.255.255", "10.0.0.1",
+	    "127.0.0.1",   "1.1.1.1", "172.16.0.1",      NULL};
+	char buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr = {0}, addr2 = {0};
+	int i;
+
+	for (i = 0; cases[i] != NULL; i++) {
+		if (cidr_addr_parse(cases[i], &addr) != CIDR_OK)
+			return 1;
+		if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+			return 1;
+		if (cidr_addr_parse(buf, &addr2) != CIDR_OK)
+			return 1;
+		if (memcmp(&addr, &addr2, sizeof(addr)) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_leading_zeros - verify leading zeros
+ * are suppressed per RFC 5952 §4.1.
+ * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 1.
+ */
+int test_ipv6_format_rfc5952_leading_zeros(void)
+{
+	static const struct {
+		const char *input;
+		const char *expected;
+	} cases[] = {
+	    {"2001:0db8:0000:0000:0000:0000:0000:0001", "2001:db8::1"},
+	    {"2001:0db8::0001", "2001:db8::1"},
+	    {"0000:0000:0000:0000:0000:0000:0000:0001", "::1"},
+	};
+	const int ncases = sizeof(cases) / sizeof(cases[0]);
+	char buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr;
+	int i;
+
+	for (i = 0; i < ncases; i++) {
+		if (cidr_addr_parse(cases[i].input, &addr) != CIDR_OK)
+			return 1;
+		if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+			return 1;
+		if (strcmp(buf, cases[i].expected) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_compress_longest - verify the longest
+ * run of consecutive zero groups is compressed with ::.
+ * See TESTING.md §3.3, RFC 5952 §4.2.1, ARCHITECTURE.md §4.2.2 rule 2.
+ */
+int test_ipv6_format_rfc5952_compress_longest(void)
+{
+	static const struct {
+		const char *input;
+		const char *expected;
+	} cases[] = {
+	    {"2001:0:0:0:0:0:0:1", "2001::1"},
+	    {"2001:db8:0:0:0:0:0:1", "2001:db8::1"},
+	    {"fe80:0:0:0:0:0:0:1", "fe80::1"},
+	    {"0:0:0:0:0:0:0:1", "::1"},
+	    {"0:0:0:0:0:0:0:0", "::"},
+	};
+	const int ncases = sizeof(cases) / sizeof(cases[0]);
+	char buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr;
+	int i;
+
+	for (i = 0; i < ncases; i++) {
+		if (cidr_addr_parse(cases[i].input, &addr) != CIDR_OK)
+			return 1;
+		if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+			return 1;
+		if (strcmp(buf, cases[i].expected) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_no_compress_single - verify a single
+ * zero group is written as "0", not compressed with ::.
+ * See TESTING.md §3.3, RFC 5952 §4.2.2, ARCHITECTURE.md §4.2.2 rule 3.
+ */
+int test_ipv6_format_rfc5952_no_compress_single(void)
+{
+	cidr_addr_t addr;
+	char buf[CIDR_ADDR_STR_MAX];
+
+	if (cidr_addr_parse("2001:db8:0:1::1", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	/*
+	 * The zero group at position 2 is a single zero:
+	 * the run of length 5 at positions 3-7 is compressed,
+	 * but the single zero at position 2 stays as "0".
+	 * Expected: 2001:db8:0:1::1
+	 */
+	if (strcmp(buf, "2001:db8:0:1::1") != 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_tie_first_wins - verify that when two
+ * consecutive zero runs are equal length, the first is compressed.
+ * See TESTING.md §3.3, RFC 5952 §4.2.3, ARCHITECTURE.md §4.2.2 rule 4.
+ */
+int test_ipv6_format_rfc5952_tie_first_wins(void)
+{
+	cidr_addr_t addr;
+	char buf[CIDR_ADDR_STR_MAX];
+
+	/*
+	 * 2001:0:0:1:0:0:2:1 has two zero runs at positions [1,2] and
+	 * [4,5], both length 2. RFC 5952 §4.2.3: first run wins.
+	 * Expected: 2001::1:0:0:2:1
+	 */
+	if (cidr_addr_parse("2001:0:0:1:0:0:2:1", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "2001::1:0:0:2:1") != 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_lowercase - verify hex digits are always
+ * lowercase per RFC 5952 §4.3.
+ * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 5.
+ */
+int test_ipv6_format_rfc5952_lowercase(void)
+{
+	cidr_addr_t addr;
+	char buf[CIDR_ADDR_STR_MAX];
+
+	/* Uppercase input "ABCD::EF01" must format as "abcd::ef01". */
+	if (cidr_addr_parse("ABCD::EF01", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "abcd::ef01") != 0)
+		return 1;
+
+	/* Mixed case input. */
+	if (cidr_addr_parse("2001:DB8::1", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "2001:db8::1") != 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_ipv6_format_rfc5952_mixed_mapped - verify IPv4-mapped addresses
+ * format with a dotted-decimal tail per RFC 5952 §5.
+ * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 6.
+ */
+int test_ipv6_format_rfc5952_mixed_mapped(void)
+{
+	cidr_addr_t addr;
+	char buf[CIDR_ADDR_STR_MAX];
+
+	/* ::ffff:192.0.2.1 -> ::ffff:192.0.2.1 */
+	if (cidr_addr_parse("::ffff:192.0.2.1", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "::ffff:192.0.2.1") != 0)
+		return 1;
+
+	/* ::ffff:c000:0201 -> ::ffff:192.0.2.1 */
+	if (cidr_addr_parse("::ffff:c000:0201", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "::ffff:192.0.2.1") != 0)
+		return 1;
+
+	/* ::ffff:0:0 (stored with mixed-notation bytes, parsed as
+	 * pure IPv6 via ::ffff:0:0 path) -> ::ffff:0.0.0.0 */
+	if (cidr_addr_parse("::ffff:0:0", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, "::ffff:0.0.0.0") != 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_ipv6_format_roundtrip - verify parse/format/parse produces
+ * bit-identical bytes for representative IPv6 addresses.
+ * See TESTING.md §6.1, ARCHITECTURE.md §4.2.
+ */
+int test_ipv6_format_roundtrip(void)
+{
+	static const char *cases[] = {"2001:db8::1",
+	                              "::1",
+	                              "::",
+	                              "fe80::1",
+	                              "::ffff:192.0.2.1",
+	                              "2001:db8::",
+	                              "ff02::1",
+	                              "2001:db8:0:1::1",
+	                              "2001::1:0:0:2:1",
+	                              "2001:db8:85a3::8a2e:370:7334",
+	                              NULL};
+	char buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr = {0}, addr2 = {0};
+	int i;
+
+	for (i = 0; cases[i] != NULL; i++) {
+		if (cidr_addr_parse(cases[i], &addr) != CIDR_OK)
+			return 1;
+		if (cidr_addr_format(&addr, buf, sizeof(buf)) != CIDR_OK)
+			return 1;
+		if (cidr_addr_parse(buf, &addr2) != CIDR_OK)
+			return 1;
+		if (memcmp(&addr, &addr2, sizeof(addr)) != 0)
+			return 1;
+	}
+	return 0;
+}
+
+/*
+ * test_addr_format_buffer_too_small - verify CIDR_ERR_INVAL when
+ * the output buffer is smaller than CIDR_ADDR_STR_MAX.
+ * See ARCHITECTURE.md §4.2.
+ */
+int test_addr_format_buffer_too_small(void)
+{
+	cidr_addr_t addr;
+	char small_buf[16];
+
+	if (cidr_addr_parse("192.168.1.1", &addr) != CIDR_OK)
+		return 1;
+	if (cidr_addr_format(&addr, small_buf, sizeof(small_buf)) !=
+	    CIDR_ERR_INVAL)
+		return 1;
+
+	/* NULL buf */
+	if (cidr_addr_format(&addr, NULL, CIDR_ADDR_STR_MAX) != CIDR_ERR_INVAL)
+		return 1;
+
+	/* NULL addr */
+	if (cidr_addr_format(NULL, small_buf, CIDR_ADDR_STR_MAX) !=
+	    CIDR_ERR_INVAL)
+		return 1;
+
+	return 0;
+}

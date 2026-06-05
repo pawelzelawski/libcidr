@@ -152,4 +152,33 @@ typedef struct cidr_index cidr_index_t;
 cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_addr_format - format an address as canonical text.
+ *
+ * Writes the canonical text representation of addr into the caller-provided
+ * buffer buf of length len. IPv4 is formatted as strict dotted-decimal
+ * (no leading zeros, no alternative notations). IPv6 is formatted per
+ * RFC 5952 canonical form: leading zeros suppressed, longest run of
+ * consecutive zero groups compressed with ::, single zero group written
+ * as "0", first run wins on tie, lowercase hex throughout, and IPv4-mapped
+ * addresses use mixed notation ::ffff:x.x.x.x.
+ *
+ * addr: pointer to a valid cidr_addr_t (family must be CIDR_AF_INET or
+ *       CIDR_AF_INET6)
+ * buf:  caller-provided output buffer; on success contains the
+ *       NUL-terminated canonical address string
+ * len:  size of buf in bytes; must be at least CIDR_ADDR_STR_MAX (46)
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addr or buf is NULL, if addr->family is
+ * CIDR_AF_UNSPEC, or if len < CIDR_ADDR_STR_MAX.
+ *
+ * On failure, buf content is undefined.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.2, §4.2.1, §4.2.2.
+ */
+cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

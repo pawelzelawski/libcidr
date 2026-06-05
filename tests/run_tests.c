@@ -27,6 +27,16 @@ extern int test_ipv6_parse_compatible_rejected(void);
 extern int test_ipv6_parse_wrong_group_count(void);
 extern int test_ipv6_parse_group_too_large(void);
 extern int test_ipv6_parse_invalid_chars(void);
+extern int test_ipv4_format_canonical(void);
+extern int test_ipv4_format_roundtrip(void);
+extern int test_ipv6_format_rfc5952_leading_zeros(void);
+extern int test_ipv6_format_rfc5952_compress_longest(void);
+extern int test_ipv6_format_rfc5952_no_compress_single(void);
+extern int test_ipv6_format_rfc5952_tie_first_wins(void);
+extern int test_ipv6_format_rfc5952_lowercase(void);
+extern int test_ipv6_format_rfc5952_mixed_mapped(void);
+extern int test_ipv6_format_roundtrip(void);
+extern int test_addr_format_buffer_too_small(void);
 
 int tests_run = 0;
 int tests_passed = 0;
@@ -56,6 +66,23 @@ int main(void)
 	    test_ipv6_parse_wrong_group_count);
 	RUN("test_ipv6_parse_group_too_large", test_ipv6_parse_group_too_large);
 	RUN("test_ipv6_parse_invalid_chars", test_ipv6_parse_invalid_chars);
+	RUN("test_ipv4_format_canonical", test_ipv4_format_canonical);
+	RUN("test_ipv4_format_roundtrip", test_ipv4_format_roundtrip);
+	RUN("test_ipv6_format_rfc5952_leading_zeros",
+	    test_ipv6_format_rfc5952_leading_zeros);
+	RUN("test_ipv6_format_rfc5952_compress_longest",
+	    test_ipv6_format_rfc5952_compress_longest);
+	RUN("test_ipv6_format_rfc5952_no_compress_single",
+	    test_ipv6_format_rfc5952_no_compress_single);
+	RUN("test_ipv6_format_rfc5952_tie_first_wins",
+	    test_ipv6_format_rfc5952_tie_first_wins);
+	RUN("test_ipv6_format_rfc5952_lowercase",
+	    test_ipv6_format_rfc5952_lowercase);
+	RUN("test_ipv6_format_rfc5952_mixed_mapped",
+	    test_ipv6_format_rfc5952_mixed_mapped);
+	RUN("test_ipv6_format_roundtrip", test_ipv6_format_roundtrip);
+	RUN("test_addr_format_buffer_too_small",
+	    test_addr_format_buffer_too_small);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;
