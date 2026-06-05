@@ -26,7 +26,7 @@
 | M2 | All C tests pass on Linux | CONFIRMED |
 | M3 | All C tests pass on OpenBSD | CONFIRMED |
 | M4 | Valgrind clean on Linux | CONFIRMED |
-| M5 | ASan/UBSan clean on both platforms | CONFIRMED |
+| M5 | ASan/UBSan clean on every target whose toolchain supports them | CONFIRMED |
 | M6 | TSan clean on Linux | CONFIRMED |
 | M7 | clang-format clean | CONFIRMED |
 | M8 | clang-tidy zero warnings | CONFIRMED |
@@ -293,7 +293,7 @@ Per TESTING.md §3, every RFC conformance test case has its own named test:
 
 - [x] All test_addr.c tests pass on all four targets
 - [x] Valgrind clean on Linux (no leaks; cidr_addr.c allocates nothing)
-- [x] ASan/UBSan clean on both platforms
+- [x] ASan/UBSan clean on every target whose toolchain supports them
 - [x] Memory discipline check: `grep -n "malloc\|free" src/cidr_addr.c` -- empty
 - [x] Quality milestones M9 (RFC conformance) partially confirmed:
       IPv4 and IPv6 parse/format RFC tests all passing
@@ -440,7 +440,8 @@ File: `tests/test_prefix.c`
 - [x] Host-bits-zero invariant test passes: `test_prefix_parse_hostbits_rejected`
       and `test_prefix_from_host_zeroes_hostbits`
 - [x] Subnet iterator ascending order test passes: `test_subnet_iter_ascending_order`
-- [x] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Valgrind clean; ASan/UBSan clean on every target whose toolchain
+      supports them
 - [x] Memory discipline check: no `malloc`/`free` in `src/cidr_prefix.c`
 - [x] Quality milestone M9 (RFC conformance) further confirmed: prefix parse
       tests pass
@@ -573,15 +574,20 @@ File: `tests/test_bulk.c`
 ### Phase 4 Completion Criteria
 
 - [ ] All test_bulk.c tests pass on all four targets
+      Comment: confirmed on Linux x86_64 and OpenBSD amd64; Linux ARM64 and
+      OpenBSD arm64 still need explicit validation evidence
 - [ ] `test_bulk_aggregate_known_cases` confirms output matches
       `ipaddress.collapse_addresses` -- quality milestone M10
-- [ ] `test_bulk_sort_pfxlen_desc_stability` passes
-- [ ] `test_bulk_parse_return_code_precedence` passes
-- [ ] Stack usage verified: no stack overflow in bulk_aggregate or bulk_sort
+      Comment: representative reference cases now pass; direct `ipaddress`
+      oracle comparison is deferred to Phase 7 Python tests
+- [x] `test_bulk_sort_pfxlen_desc_stability` passes
+- [x] `test_bulk_parse_return_code_precedence` passes
+- [x] Stack usage verified: no stack overflow in bulk_aggregate or bulk_sort
       with 1M IPv6 prefix input under ASan (default 8 MiB stack)
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
-- [ ] Memory discipline check: no `malloc`/`free` in `src/cidr_bulk.c`
-- [ ] TSan: no races when `cidr_bulk_sort` and `cidr_bulk_aggregate` called
+- [x] Valgrind clean; ASan/UBSan clean on every target whose toolchain
+      supports them
+- [x] Memory discipline check: no `malloc`/`free` in `src/cidr_bulk.c`
+- [x] TSan: no races when `cidr_bulk_sort` and `cidr_bulk_aggregate` called
       from multiple threads on independent arrays (they share no global state)
 
 ---
@@ -675,7 +681,8 @@ File: `tests/test_classify.c`
 - [ ] `test_classify_global_exclusivity` passes
 - [ ] `test_classify_multi_flag_2001_sub_blocks` passes
 - [ ] Terminated entries classified correctly
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
+- [ ] Valgrind clean; ASan/UBSan clean on every target whose toolchain
+      supports them
 - [ ] Memory discipline check: no `malloc`/`free` in `src/cidr_classify.c`
 
 ---
@@ -799,7 +806,7 @@ File: `tests/test_index.c`
 - [ ] `test_index_lpm_matches_sorted_bulk` passes for routing-table-scale
       inputs
 - [ ] Valgrind clean: no leaks, no use-after-free on all index test paths
-- [ ] ASan/UBSan clean on both platforms
+- [ ] ASan/UBSan clean on every target whose toolchain supports them
 - [ ] TSan: `test_concurrent_index_lookup` passes (concurrent reads on a
       completed index; no races per ARCHITECTURE.md §1.4)
 - [ ] Memory discipline check: `malloc`/`free` present only in

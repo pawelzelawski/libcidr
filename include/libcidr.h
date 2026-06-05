@@ -666,7 +666,9 @@ cidr_err_t cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
  * prefix_count: number of entries in prefixes
  * matches:      caller-provided ssize_t array; receives match index or -1
  * errs:         optional per-item error array (may be NULL); when non-NULL,
- *               each entry is set to CIDR_OK
+ *               each entry is set to CIDR_OK on match or no-match, or
+ *               CIDR_ERR_FAMILY when the address family does not match the
+ *               prefix table family
  *
  * Returns CIDR_OK on success.
  * Returns CIDR_ERR_INVAL if addrs or matches is NULL when addr_count > 0,

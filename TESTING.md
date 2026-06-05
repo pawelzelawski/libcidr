@@ -339,7 +339,7 @@ Valgrind is not available on OpenBSD -- use the ASan build there.
 Run on both platforms after every phase:
 
 ```sh
-make dev    # compiles with -fsanitize=address,undefined
+make dev    # compiles with -fsanitize=address,undefined when supported
 make test
 ```
 
@@ -352,7 +352,8 @@ UBSan detects:
 - Null pointer dereferences on checked pointer parameters
 - Misaligned memory access (verifies struct layout is correctly aligned)
 
-All C tests must pass ASan/UBSan clean on both Linux and OpenBSD.
+All C tests must pass ASan/UBSan clean on every target whose toolchain
+supports those sanitizers.
 
 ### 4.3 ThreadSanitizer
 
@@ -421,13 +422,15 @@ Every phase must pass on all four targets before it is complete:
 |---|---|---|---|
 | Linux | x86_64 | ASan/UBSan, TSan, Valgrind | Primary development target |
 | Linux | ARM64 | ASan/UBSan, TSan | CI via GitHub Actions arm64 runner |
-| OpenBSD | amd64 | ASan/UBSan | Valgrind not available |
-| OpenBSD | arm64 | ASan/UBSan | CI via GitHub Actions OpenBSD arm64 |
+| OpenBSD | amd64 | ASan/UBSan when toolchain supports it | Valgrind not available |
+| OpenBSD | arm64 | ASan/UBSan when toolchain supports it | CI via GitHub Actions OpenBSD arm64 |
 
 ### 5.2 Platform-Specific Concerns
 
-**No Valgrind on OpenBSD.** ASan/UBSan (`make dev`) is the memory safety gate.
-The ASan build provides equivalent leak and out-of-bounds detection.
+**No Valgrind on OpenBSD.** When the installed Clang toolchain provides
+ASan/UBSan, `make dev` is the memory safety gate. Some OpenBSD base compiler
+builds do not ship sanitizer runtimes; in that case `make dev` falls back to a
+non-sanitized debug build.
 
 **No platform-conditional C code.** libcidr has no platform-specific
 implementation paths -- it uses only portable C11 and POSIX. There are no
@@ -932,7 +935,7 @@ when the test passes cleanly under all sanitisers on both platforms.
 | M2 - All C tests pass on Linux | test binary passes on Linux x86_64 and ARM64 |
 | M3 - All C tests pass on OpenBSD | test binary passes on OpenBSD amd64 and arm64 |
 | M4 - Valgrind clean on Linux | `make valgrind` clean |
-| M5 - ASan/UBSan clean on both platforms | `make dev && make test` clean on all four |
+| M5 - ASan/UBSan clean on every target whose toolchain supports them | `make dev && make test` clean on all supported sanitizer targets |
 | M6 - TSan clean on Linux | `make test-tsan` clean |
 | M7 - clang-format clean | `make format` produces no diff |
 | M8 - clang-tidy zero warnings | `make lint` clean |

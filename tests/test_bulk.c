@@ -7,9 +7,46 @@
  * See DEVELOPMENT.md §Phase 4 Tests for the full test catalogue.
  */
 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../include/libcidr.h"
+
+#ifdef CIDR_STACK_CHECK
+#define BULK_STACK_CHECK_COUNT 1000000U
+#endif
+
+static unsigned char *
+prefix_marker_ptr(cidr_prefix_t *prefix)
+{
+	return ((unsigned char *)prefix) + 21;
+}
+
+static void
+prefix_marker_set(cidr_prefix_t *prefix, uint8_t value)
+{
+	memset(prefix_marker_ptr(prefix), value, 3);
+}
+
+static uint8_t
+prefix_marker_get(const cidr_prefix_t *prefix)
+{
+	return prefix_marker_ptr((cidr_prefix_t *)prefix)[0];
+}
+
+static int
+expect_prefix_string(const cidr_prefix_t *prefix, const char *expected)
+{
+	char buf[CIDR_PREFIX_STR_MAX];
+
+	if (cidr_prefix_format(prefix, buf, sizeof(buf)) != CIDR_OK)
+		return 1;
+	if (strcmp(buf, expected) != 0)
+		return 1;
+	return 0;
+}
 
 /*
  * test_bulk_parse_empty -- count == 0 returns CIDR_OK with no work
@@ -106,6 +143,25 @@ test_bulk_parse_partial_failure(void)
 	if (out[2].family != CIDR_AF_INET)
 		return 1;
 
+	return 0;
+}
+
+/*
+ * test_bulk_parse_failure_zero_initialised -- parse failures must write a
+ * zero-initialised cidr_addr_t, not only family = CIDR_AF_UNSPEC.
+ */
+int
+test_bulk_parse_failure_zero_initialised(void)
+{
+	const char *srcs[] = {"BAD"};
+	cidr_addr_t out[1];
+	cidr_addr_t zero = {0};
+
+	memset(out, 0x5A, sizeof(out));
+	if (cidr_bulk_parse(srcs, 1, out, NULL) != CIDR_ERR_PARSE)
+		return 1;
+	if (memcmp(&out[0], &zero, sizeof(zero)) != 0)
+		return 1;
 	return 0;
 }
 
@@ -367,6 +423,7 @@ test_bulk_contains_empty_prefix_table(void)
 {
 	cidr_addr_t addrs[2];
 	ssize_t matches[2];
+	cidr_err_t errs[2] = {CIDR_ERR_PARSE, CIDR_ERR_PARSE};
 	cidr_err_t rc;
 
 	if (cidr_addr_parse("10.0.0.1", &addrs[0]) != CIDR_OK)
@@ -374,10 +431,12 @@ test_bulk_contains_empty_prefix_table(void)
 	if (cidr_addr_parse("192.168.1.1", &addrs[1]) != CIDR_OK)
 		return 1;
 
-	rc = cidr_bulk_contains(addrs, 2, NULL, 0, matches, NULL);
+	rc = cidr_bulk_contains(addrs, 2, NULL, 0, matches, errs);
 	if (rc != CIDR_OK)
 		return 1;
 	if (matches[0] != -1 || matches[1] != -1)
+		return 1;
+	if (errs[0] != CIDR_OK || errs[1] != CIDR_OK)
 		return 1;
 
 	return 0;
@@ -411,14 +470,19 @@ test_bulk_contains_family_mismatch(void)
 	cidr_prefix_t prefixes[1];
 	cidr_addr_t addrs[1];
 	ssize_t matches[1];
+	cidr_err_t errs[1] = {CIDR_OK};
 
 	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
 		return 1;
 	if (cidr_addr_parse("2001:db8::1", &addrs[0]) != CIDR_OK)
 		return 1;
 
-	if (cidr_bulk_contains(addrs, 1, prefixes, 1, matches, NULL) !=
+	if (cidr_bulk_contains(addrs, 1, prefixes, 1, matches, errs) !=
 	    CIDR_ERR_FAMILY)
+		return 1;
+	if (matches[0] != -1)
+		return 1;
+	if (errs[0] != CIDR_ERR_FAMILY)
 		return 1;
 
 	return 0;
@@ -432,34 +496,82 @@ test_bulk_contains_family_mismatch(void)
 int
 test_bulk_aggregate_known_cases(void)
 {
-	cidr_prefix_t prefixes[4];
+	static const struct {
+		const char *name;
+		const char *inputs[8];
+		const char *expected[8];
+		size_t input_count;
+		size_t expected_count;
+	} cases[] = {
+	    {
+	        .name = "adjacent /24s collapse to /22",
+	        .inputs =
+	            {
+	                "10.0.0.0/24",
+	                "10.0.1.0/24",
+	                "10.0.2.0/24",
+	                "10.0.3.0/24",
+	            },
+	        .expected = {"10.0.0.0/22"},
+	        .input_count = 4,
+	        .expected_count = 1,
+	    },
+	    {
+	        .name = "contained prefixes collapse to covering /8",
+	        .inputs =
+	            {
+	                "10.0.0.0/8",
+	                "10.1.0.0/16",
+	                "10.1.2.0/24",
+	                "10.2.0.0/16",
+	            },
+	        .expected = {"10.0.0.0/8"},
+	        .input_count = 4,
+	        .expected_count = 1,
+	    },
+	    {
+	        .name = "mixed disjoint and mergeable prefixes match ipaddress",
+	        .inputs =
+	            {
+	                "192.168.0.0/24",
+	                "192.168.1.0/24",
+	                "10.0.0.0/8",
+	                "10.1.0.0/16",
+	                "172.16.0.0/12",
+	            },
+	        .expected =
+	            {
+	                "10.0.0.0/8",
+	                "172.16.0.0/12",
+	                "192.168.0.0/23",
+	            },
+	        .input_count = 5,
+	        .expected_count = 3,
+	    },
+	};
+	cidr_prefix_t prefixes[8];
 	size_t out_count;
-	cidr_err_t rc;
+	size_t case_idx;
+	size_t i;
 
-	/* Adjacent /24s → /22 */
-	if (cidr_prefix_parse("10.0.0.0/24", &prefixes[0]) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_parse("10.0.1.0/24", &prefixes[1]) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_parse("10.0.2.0/24", &prefixes[2]) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_parse("10.0.3.0/24", &prefixes[3]) != CIDR_OK)
-		return 1;
+	for (case_idx = 0; case_idx < sizeof(cases) / sizeof(cases[0]);
+	     case_idx++) {
+		for (i = 0; i < cases[case_idx].input_count; i++) {
+			if (cidr_prefix_parse(cases[case_idx].inputs[i],
+			                      &prefixes[i]) != CIDR_OK)
+				return 1;
+		}
 
-	rc = cidr_bulk_aggregate(prefixes, 4, &out_count);
-	if (rc != CIDR_OK)
-		return 1;
-	if (out_count != 1)
-		return 1;
-
-	{
-		char buf[CIDR_PREFIX_STR_MAX];
-
-		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
-		    CIDR_OK)
+		if (cidr_bulk_aggregate(prefixes, cases[case_idx].input_count,
+		                        &out_count) != CIDR_OK)
 			return 1;
-		if (strcmp(buf, "10.0.0.0/22") != 0)
+		if (out_count != cases[case_idx].expected_count)
 			return 1;
+		for (i = 0; i < out_count; i++) {
+			if (expect_prefix_string(
+			        &prefixes[i], cases[case_idx].expected[i]) != 0)
+				return 1;
+		}
 	}
 
 	return 0;
@@ -851,7 +963,8 @@ int
 test_bulk_sort_pfxlen_desc_stability(void)
 {
 	cidr_prefix_t prefixes[5];
-	cidr_err_t rc;
+	uint8_t expected[] = {0x10, 0x13, 0x12, 0x21, 0x24};
+	size_t i;
 
 	/*
 	 * Set up an array with duplicates at known positions:
@@ -868,79 +981,130 @@ test_bulk_sort_pfxlen_desc_stability(void)
 		return 1;
 	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[4]) != CIDR_OK)
 		return 1;
+	prefix_marker_set(&prefixes[0], 0x10);
+	prefix_marker_set(&prefixes[1], 0x21);
+	prefix_marker_set(&prefixes[2], 0x12);
+	prefix_marker_set(&prefixes[3], 0x13);
+	prefix_marker_set(&prefixes[4], 0x24);
 
-	rc = cidr_bulk_sort(prefixes, 5, CIDR_SORT_PFXLEN_DESC);
-	if (rc != CIDR_OK)
+	if (cidr_bulk_sort(prefixes, 5, CIDR_SORT_PFXLEN_DESC) != CIDR_OK)
 		return 1;
 
-	/*
-	 * After sorting by ~pfxlen then addr:
-	 * /24: 10.1.0.0/24 (index 0), 10.1.0.0/24 (index 3)  -- stable: 0 < 3
-	 * /12: 172.16.0.0/12 (index 2)
-	 * /8:  10.0.0.0/8 (index 1), 10.0.0.0/8 (index 4)    -- stable: 1 < 4
-	 *
-	 * So within each equal-key group, the lower input index
-	 * must appear first.
-	 */
-	{
-		char buf[CIDR_PREFIX_STR_MAX];
-		int idx_10_1_24_first, idx_10_1_24_second;
-		int idx_10_8_first, idx_10_8_second;
-
-		/* Find positions of the two 10.1.0.0/24 entries */
-		idx_10_1_24_first = -1;
-		idx_10_1_24_second = -1;
-		for (int i = 0; i < 5; i++) {
-			if (cidr_prefix_format(&prefixes[i], buf,
-			                       sizeof(buf)) != CIDR_OK)
-				return 1;
-			if (strcmp(buf, "10.1.0.0/24") == 0) {
-				if (idx_10_1_24_first < 0)
-					idx_10_1_24_first = i;
-				else
-					idx_10_1_24_second = i;
-			}
-		}
-
-		/* The one from original index 0 must precede original index 3
-		 */
-		if (idx_10_1_24_first < 0 || idx_10_1_24_second < 0)
-			return 1;
-		if (idx_10_1_24_first > idx_10_1_24_second)
-			return 1;
-
-		/* Find positions of the two 10.0.0.0/8 entries */
-		idx_10_8_first = -1;
-		idx_10_8_second = -1;
-		for (int i = 0; i < 5; i++) {
-			if (cidr_prefix_format(&prefixes[i], buf,
-			                       sizeof(buf)) != CIDR_OK)
-				return 1;
-			if (strcmp(buf, "10.0.0.0/8") == 0) {
-				if (idx_10_8_first < 0)
-					idx_10_8_first = i;
-				else
-					idx_10_8_second = i;
-			}
-		}
-
-		/* The one from original index 1 must precede original index 4
-		 */
-		if (idx_10_8_first < 0 || idx_10_8_second < 0)
-			return 1;
-		if (idx_10_8_first > idx_10_8_second)
-			return 1;
-
-		/* Verify 172.16.0.0/12 is between the /24 and /8 groups */
-		if (cidr_prefix_format(&prefixes[2], buf, sizeof(buf)) !=
-		    CIDR_OK)
-			return 1;
-		if (strcmp(buf, "172.16.0.0/12") != 0)
+	for (i = 0; i < 5; i++) {
+		if (prefix_marker_get(&prefixes[i]) != expected[i])
 			return 1;
 	}
+	if (expect_prefix_string(&prefixes[0], "10.1.0.0/24") != 0)
+		return 1;
+	if (expect_prefix_string(&prefixes[1], "10.1.0.0/24") != 0)
+		return 1;
+	if (expect_prefix_string(&prefixes[2], "172.16.0.0/12") != 0)
+		return 1;
+	if (expect_prefix_string(&prefixes[3], "10.0.0.0/8") != 0)
+		return 1;
+	if (expect_prefix_string(&prefixes[4], "10.0.0.0/8") != 0)
+		return 1;
 
 	return 0;
 }
+
+#ifdef CIDR_STACK_CHECK
+/*
+ * test_bulk_sort_ipv6_million_stack_bound -- verify the documented stack
+ * bound with a 1M-entry IPv6 input under the ASan/UBSan build.
+ */
+int
+test_bulk_sort_ipv6_million_stack_bound(void)
+{
+	cidr_prefix_t *prefixes;
+	size_t count;
+	size_t i;
+
+	count = BULK_STACK_CHECK_COUNT;
+	prefixes = calloc(count, sizeof(*prefixes));
+	if (prefixes == NULL)
+		return 1;
+
+	for (i = 0; i < count; i++) {
+		prefixes[i].addr.family = CIDR_AF_INET6;
+		prefixes[i].addr.addr.v6[0] = 0x20;
+		prefixes[i].addr.addr.v6[1] = 0x01;
+		prefixes[i].addr.addr.v6[2] = 0x0d;
+		prefixes[i].addr.addr.v6[3] = 0xb8;
+		prefixes[i].addr.addr.v6[12] = (uint8_t)(i >> 24);
+		prefixes[i].addr.addr.v6[13] = (uint8_t)(i >> 16);
+		prefixes[i].addr.addr.v6[14] = (uint8_t)(i >> 8);
+		prefixes[i].addr.addr.v6[15] = (uint8_t)i;
+		prefixes[i].pfxlen = 128;
+	}
+
+	if (cidr_bulk_sort(prefixes, count, CIDR_SORT_PFXLEN_DESC) != CIDR_OK) {
+		free(prefixes);
+		return 1;
+	}
+	if (prefixes[0].addr.addr.v6[12] != 0 ||
+	    prefixes[0].addr.addr.v6[13] != 0 ||
+	    prefixes[0].addr.addr.v6[14] != 0 ||
+	    prefixes[0].addr.addr.v6[15] != 0) {
+		free(prefixes);
+		return 1;
+	}
+	if (prefixes[count - 1].addr.addr.v6[12] !=
+	        (uint8_t)((count - 1) >> 24) ||
+	    prefixes[count - 1].addr.addr.v6[13] !=
+	        (uint8_t)((count - 1) >> 16) ||
+	    prefixes[count - 1].addr.addr.v6[14] !=
+	        (uint8_t)((count - 1) >> 8) ||
+	    prefixes[count - 1].addr.addr.v6[15] != (uint8_t)(count - 1)) {
+		free(prefixes);
+		return 1;
+	}
+
+	free(prefixes);
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_ipv6_million_stack_bound -- verify bulk aggregation on
+ * a 1M-entry IPv6 input does not overflow the stack.
+ */
+int
+test_bulk_aggregate_ipv6_million_stack_bound(void)
+{
+	cidr_prefix_t *prefixes;
+	size_t count;
+	size_t out_count;
+	size_t i;
+
+	count = BULK_STACK_CHECK_COUNT;
+	prefixes = calloc(count, sizeof(*prefixes));
+	if (prefixes == NULL)
+		return 1;
+
+	for (i = 0; i < count; i++) {
+		prefixes[i].addr.family = CIDR_AF_INET6;
+		prefixes[i].addr.addr.v6[0] = 0x20;
+		prefixes[i].addr.addr.v6[1] = 0x01;
+		prefixes[i].addr.addr.v6[2] = 0x0d;
+		prefixes[i].addr.addr.v6[3] = 0xb8;
+		prefixes[i].addr.addr.v6[4] = (uint8_t)(i >> 8);
+		prefixes[i].addr.addr.v6[5] = (uint8_t)i;
+		prefixes[i].pfxlen = 128;
+	}
+
+	if (cidr_bulk_aggregate(prefixes, count, &out_count) != CIDR_OK) {
+		free(prefixes);
+		return 1;
+	}
+	if (out_count == 0) {
+		free(prefixes);
+		return 1;
+	}
+
+	free(prefixes);
+	return 0;
+}
+#endif
 
 /*
  * test_bulk_sort_null_prefixes -- CIDR_ERR_INVAL when count > 0 and

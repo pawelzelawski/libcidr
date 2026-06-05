@@ -38,6 +38,6 @@ _Static_assert(
  * See ARCHITECTURE.md §5.4, §5.5.
  */
 void radix_sort_prefixes(cidr_prefix_t *prefixes, size_t count,
-                         cidr_sort_order_t order);
+                         cidr_sort_order_t order, cidr_family_t family);
 
 #endif /* CIDR_INTERNAL_H */

@@ -1,7 +1,7 @@
 # Makefile - libcidr
 #
 # Targets:
-#   make / make dev    - debug build with ASan/UBSan (Linux only), runs tests
+#   make / make dev    - debug build, enables ASan/UBSan when supported, runs tests
 #   make release       - optimised static library
 #   make test          - build and run test suite (dev flags)
 #   make test-tsan     - TSan build and test run, Clang only, Linux only
@@ -12,7 +12,7 @@
 #   make install       - install libcidr.a and include/libcidr.h
 #   make python-ext    - build CPython extension
 #   make python-check-abi - verify stable ABI marker
-#   make python-dev    - build CPython extension with ASan/UBSan
+#   make python-dev    - build CPython extension with ASan/UBSan when supported
 #   make test-python   - run Python binding tests
 #
 # Compatible with GNU make (Linux) and BSD make (OpenBSD).
@@ -45,13 +45,21 @@ CFLAGS_OS != if [ "$(OS)" = "Linux" ]; then echo "-DCIDR_LINUX"; \
               elif [ "$(OS)" = "OpenBSD" ]; then echo "-DCIDR_OPENBSD"; \
               else echo ""; fi
 
-# ASan/UBSan - Linux only; OpenBSD clang does not ship sanitizer runtimes
-SANITIZERS != if [ "$(OS)" = "Linux" ]; then echo "-fsanitize=address,undefined"; else echo ""; fi
+# ASan/UBSan - enable only when the active compiler supports the flags.
+# OpenBSD base clang may not ship sanitizer runtimes.
+SANITIZERS != if printf 'int main(void){return 0;}\n' | \
+                  $(CC) -x c -std=c11 -fsyntax-only \
+                  -fsanitize=address,undefined - >/dev/null 2>&1; then \
+                  echo "-fsanitize=address,undefined"; \
+              else \
+                  echo ""; \
+              fi
 
 CFLAGS_DEV     = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
-                 -O1 -g						\
-                 $(SANITIZERS)					\
-                 -DCIDR_TEST
+	                 -O1 -g						\
+	                 $(SANITIZERS)					\
+	                 -DCIDR_STACK_CHECK				\
+	                 -DCIDR_TEST
 
 CFLAGS_RELEASE = $(CFLAGS_COMMON) $(CFLAGS_OS) -O2 -DNDEBUG
 
@@ -75,6 +83,9 @@ LIB_SRCS = src/cidr_addr.c					\
 
 TEST_SRCS = tests/run_tests.c tests/test_addr.c tests/test_prefix.c \
             tests/test_bulk.c
+TEST_SRCS_TSAN = $(TEST_SRCS) tests/test_tsan.c
+
+THREAD_FLAGS = -pthread
 
 # --- Build paths --------------------------------------------------------------
 
@@ -160,19 +171,19 @@ test-tsan:
 	    exit 1; \
 	fi
 	@mkdir -p $(TSAN_DIR) $(BUILD_TESTS_DIR)
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -c src/cidr_addr.c     -o $(TSAN_DIR)/cidr_addr.o
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -c src/cidr_prefix.c   -o $(TSAN_DIR)/cidr_prefix.o
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -c src/cidr_bulk.c     -o $(TSAN_DIR)/cidr_bulk.o
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -c src/cidr_classify.c  -o $(TSAN_DIR)/cidr_classify.o
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -c src/cidr_index.c     -o $(TSAN_DIR)/cidr_index.o
+	$(CC) $(CFLAGS_TSAN) $(THREAD_FLAGS) $(INCLUDES) -c src/cidr_addr.c     -o $(TSAN_DIR)/cidr_addr.o
+	$(CC) $(CFLAGS_TSAN) $(THREAD_FLAGS) $(INCLUDES) -c src/cidr_prefix.c   -o $(TSAN_DIR)/cidr_prefix.o
+	$(CC) $(CFLAGS_TSAN) $(THREAD_FLAGS) $(INCLUDES) -c src/cidr_bulk.c     -o $(TSAN_DIR)/cidr_bulk.o
+	$(CC) $(CFLAGS_TSAN) $(THREAD_FLAGS) $(INCLUDES) -c src/cidr_classify.c  -o $(TSAN_DIR)/cidr_classify.o
+	$(CC) $(CFLAGS_TSAN) $(THREAD_FLAGS) $(INCLUDES) -c src/cidr_index.c     -o $(TSAN_DIR)/cidr_index.o
 	ar rcs $(LIB_TSAN)						\
 	    $(TSAN_DIR)/cidr_addr.o					\
 	    $(TSAN_DIR)/cidr_prefix.o					\
 	    $(TSAN_DIR)/cidr_bulk.o					\
 	    $(TSAN_DIR)/cidr_classify.o				\
 	    $(TSAN_DIR)/cidr_index.o
-	$(CC) $(CFLAGS_TSAN) $(INCLUDES) -I tests/			\
-	    $(TEST_SRCS) $(LIB_TSAN)				\
+	$(CC) $(CFLAGS_TSAN) -DCIDR_TSAN $(THREAD_FLAGS) $(INCLUDES) -I tests/	\
+	    $(TEST_SRCS_TSAN) $(LIB_TSAN)			\
 	    -o $(TEST_BIN_TSAN)
 	$(TEST_BIN_TSAN)
 

@@ -459,12 +459,15 @@ Valgrind is not available on OpenBSD -- use the ASan build there.
 
 **Purpose**: Runtime memory and undefined behaviour detection.
 
-**Compiler flags**: `-fsanitize=address,undefined` (included in `make dev`)
+**Compiler flags**: `-fsanitize=address,undefined` when supported by the
+active toolchain; `make dev` enables them automatically when available.
 
-Available on both Linux and OpenBSD with Clang.
+Available on Linux with Clang. On OpenBSD, sanitizer availability depends on
+the installed Clang toolchain; the base system compiler may not ship ASan/UBSan
+runtimes.
 
 ```sh
-make dev    # compiles with -fsanitize=address,undefined
+make dev    # compiles with -fsanitize=address,undefined when supported
 make test
 ```
 
@@ -474,7 +477,8 @@ accepts caller-provided arrays must be verified under UBSan -- the caller-
 provided buffer model requires that the library never accesses outside the
 declared bounds.
 
-All C tests must pass ASan/UBSan clean on both platforms.
+All C tests must pass ASan/UBSan clean on every target whose toolchain
+supports those sanitizers.
 
 **Python extension under ASan**: The Python extension can be tested under ASan
 by building it with ASan flags and running the Python test suite with the

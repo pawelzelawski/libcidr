@@ -91,6 +91,7 @@ extern int test_bulk_parse_empty(void);
 extern int test_bulk_parse_single(void);
 extern int test_bulk_parse_all_valid(void);
 extern int test_bulk_parse_partial_failure(void);
+extern int test_bulk_parse_failure_zero_initialised(void);
 extern int test_bulk_parse_null_errs(void);
 extern int test_bulk_parse_null_element(void);
 extern int test_bulk_parse_return_code_precedence(void);
@@ -115,9 +116,17 @@ extern int test_bulk_sort_network_asc_order(void);
 extern int test_bulk_sort_network_asc_ipv6(void);
 extern int test_bulk_sort_pfxlen_desc_order(void);
 extern int test_bulk_sort_pfxlen_desc_stability(void);
+#ifdef CIDR_STACK_CHECK
+extern int test_bulk_sort_ipv6_million_stack_bound(void);
+extern int test_bulk_aggregate_ipv6_million_stack_bound(void);
+#endif
 extern int test_bulk_sort_null_prefixes(void);
 extern int test_bulk_sort_family_mismatch(void);
 extern int test_bulk_sort_unspec_family(void);
+#ifdef CIDR_TSAN
+extern int test_concurrent_bulk_sort_independent(void);
+extern int test_concurrent_bulk_aggregate_independent(void);
+#endif
 
 int tests_run = 0;
 int tests_passed = 0;
@@ -225,6 +234,8 @@ main(void)
 	RUN("test_bulk_parse_single", test_bulk_parse_single);
 	RUN("test_bulk_parse_all_valid", test_bulk_parse_all_valid);
 	RUN("test_bulk_parse_partial_failure", test_bulk_parse_partial_failure);
+	RUN("test_bulk_parse_failure_zero_initialised",
+	    test_bulk_parse_failure_zero_initialised);
 	RUN("test_bulk_parse_null_errs", test_bulk_parse_null_errs);
 	RUN("test_bulk_parse_null_element", test_bulk_parse_null_element);
 	RUN("test_bulk_parse_return_code_precedence",
@@ -264,9 +275,21 @@ main(void)
 	    test_bulk_sort_pfxlen_desc_order);
 	RUN("test_bulk_sort_pfxlen_desc_stability",
 	    test_bulk_sort_pfxlen_desc_stability);
+#ifdef CIDR_STACK_CHECK
+	RUN("test_bulk_sort_ipv6_million_stack_bound",
+	    test_bulk_sort_ipv6_million_stack_bound);
+	RUN("test_bulk_aggregate_ipv6_million_stack_bound",
+	    test_bulk_aggregate_ipv6_million_stack_bound);
+#endif
 	RUN("test_bulk_sort_null_prefixes", test_bulk_sort_null_prefixes);
 	RUN("test_bulk_sort_family_mismatch", test_bulk_sort_family_mismatch);
 	RUN("test_bulk_sort_unspec_family", test_bulk_sort_unspec_family);
+#ifdef CIDR_TSAN
+	RUN("test_concurrent_bulk_sort_independent",
+	    test_concurrent_bulk_sort_independent);
+	RUN("test_concurrent_bulk_aggregate_independent",
+	    test_concurrent_bulk_aggregate_independent);
+#endif
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

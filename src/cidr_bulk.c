@@ -14,6 +14,9 @@
 #include "../include/libcidr.h"
 #include "cidr_internal.h"
 
+#define RADIX_BUCKETS 256
+#define SORT_TAG_BYTES 4
+
 /*
  * radix_addr_len - return the address byte width for a given family.
  *
@@ -24,6 +27,66 @@ static inline size_t
 radix_addr_len(cidr_family_t family)
 {
 	return (family == CIDR_AF_INET) ? 4 : 16;
+}
+
+/*
+ * prefix_order_tag_set - stash the original input index in addr.family.
+ *
+ * Used only by the CIDR_SORT_PFXLEN_DESC path to repair exact-duplicate
+ * runs after the primary radix sort. The caller passes the true family to
+ * radix_sort_prefixes(), so temporarily repurposing addr.family here does
+ * not affect key extraction.
+ */
+static inline void
+prefix_order_tag_set(cidr_prefix_t *prefix, uint32_t order_tag)
+{
+	unsigned char *bytes;
+
+	bytes = (unsigned char *)&prefix->addr.family;
+	bytes[0] = (unsigned char)(order_tag & 0xFF);
+	bytes[1] = (unsigned char)((order_tag >> 8) & 0xFF);
+	bytes[2] = (unsigned char)((order_tag >> 16) & 0xFF);
+	bytes[3] = (unsigned char)((order_tag >> 24) & 0xFF);
+}
+
+/*
+ * prefix_order_tag_get - load the stashed original input index.
+ */
+static inline uint32_t
+prefix_order_tag_get(const cidr_prefix_t *prefix)
+{
+	const unsigned char *bytes;
+
+	bytes = (const unsigned char *)&prefix->addr.family;
+	return ((uint32_t)bytes[0]) | ((uint32_t)bytes[1] << 8) |
+	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
+
+/*
+ * prefixes_prepare_order_tags - record the original input order for every
+ * prefix before the descending-prefix-length sort mutates the array.
+ */
+static void
+prefixes_prepare_order_tags(cidr_prefix_t *prefixes, size_t count)
+{
+	size_t i;
+
+	for (i = 0; i < count; i++)
+		prefix_order_tag_set(&prefixes[i], (uint32_t)i);
+}
+
+/*
+ * prefixes_restore_family - restore the true address family after the
+ * duplicate-order repair pass.
+ */
+static void
+prefixes_restore_family(cidr_prefix_t *prefixes, size_t count,
+                        cidr_family_t family)
+{
+	size_t i;
+
+	for (i = 0; i < count; i++)
+		prefixes[i].addr.family = family;
 }
 
 /*
@@ -63,6 +126,16 @@ radix_key_byte(const cidr_prefix_t *p, size_t byte_pos, size_t addr_len,
 }
 
 /*
+ * radix_u32_byte - extract one byte from a uint32_t key in big-endian
+ * order for the duplicate-order repair pass.
+ */
+static inline uint8_t
+radix_u32_byte(uint32_t value, size_t byte_pos)
+{
+	return (uint8_t)(value >> ((SORT_TAG_BYTES - 1 - byte_pos) * 8));
+}
+
+/*
  * prefix_swap - swap two cidr_prefix_t values in place.
  */
 static inline void
@@ -82,9 +155,9 @@ prefix_swap(cidr_prefix_t *restrict a, cidr_prefix_t *restrict b)
  * Uses a stable in-place counting-sort-based partition at each byte
  * position, then recurses on non-trivial buckets.
  *
- * SAFETY: stack usage per level is bounded by 4 * 256 * sizeof(size_t)
- * = 8192 bytes on 64-bit platforms. Max recursion depth is key_len (17
- * for IPv6), giving a worst-case stack of 17 * 8192 = 139,264 bytes,
+ * SAFETY: stack usage per level is bounded by 3 * 256 * sizeof(size_t)
+ * = 6144 bytes on 64-bit platforms. Max recursion depth is key_len (17
+ * for IPv6), giving a worst-case stack of 17 * 6144 = 104,448 bytes,
  * well within the default 8 MiB stack. See ARCHITECTURE.md §5.4.
  *
  * prefixes:  prefix array
@@ -100,9 +173,9 @@ radix_sort_segment(cidr_prefix_t *prefixes, size_t start, size_t end,
                    size_t byte_pos, size_t key_len, cidr_sort_order_t order,
                    size_t addr_len)
 {
-	size_t count[256] = {0};
-	size_t start_pos[256];
-	size_t next[256];
+	size_t count[RADIX_BUCKETS] = {0};
+	size_t start_pos[RADIX_BUCKETS];
+	size_t next[RADIX_BUCKETS];
 	size_t i;
 	int b;
 
@@ -124,16 +197,15 @@ radix_sort_segment(cidr_prefix_t *prefixes, size_t start, size_t end,
 
 	/* Compute bucket start positions */
 	start_pos[0] = start;
-	for (b = 1; b < 256; b++)
+	for (b = 1; b < RADIX_BUCKETS; b++)
 		start_pos[b] = start_pos[b - 1] + count[b - 1];
 
 	/*
 	 * Compute bucket end positions (exclusive) and initialise
 	 * the next-pointer array from start positions.
 	 */
-	for (b = 0; b < 255; b++)
+	for (b = 0; b < RADIX_BUCKETS; b++)
 		next[b] = start_pos[b];
-	next[255] = end;
 
 	/*
 	 * Stable in-place partition by digit value.
@@ -151,7 +223,7 @@ radix_sort_segment(cidr_prefix_t *prefixes, size_t start, size_t end,
 	for (i = start; i < end;) {
 		uint8_t d =
 		    radix_key_byte(&prefixes[i], byte_pos, addr_len, order);
-		size_t end_d = (d < 255) ? start_pos[d + 1] : end;
+		size_t end_d = (d < RADIX_BUCKETS - 1) ? start_pos[d + 1] : end;
 
 		if (i >= start_pos[d] && i < end_d) {
 			i++;
@@ -161,15 +233,121 @@ radix_sort_segment(cidr_prefix_t *prefixes, size_t start, size_t end,
 	}
 
 	/* Recurse on non-trivial buckets */
-	for (b = 0; b < 256; b++) {
+	for (b = 0; b < RADIX_BUCKETS; b++) {
 		size_t seg_start = start_pos[b];
-		size_t seg_end = (b < 255) ? start_pos[b + 1] : end;
+		size_t seg_end =
+		    (b < RADIX_BUCKETS - 1) ? start_pos[b + 1] : end;
 
 		if (seg_end - seg_start > 1)
 			radix_sort_segment(prefixes, seg_start, seg_end,
 			                   byte_pos + 1, key_len, order,
 			                   addr_len);
 	}
+}
+
+/*
+ * radix_sort_order_tags - sort a duplicate run by original input order.
+ *
+ * Runs only on exact-duplicate segments after the primary sort. order_tag
+ * values are unique, so a plain in-place radix sort over four bytes
+ * restores the original relative order without heap allocation.
+ */
+static void
+radix_sort_order_tags(cidr_prefix_t *prefixes, size_t start, size_t end,
+                      size_t byte_pos)
+{
+	size_t count[RADIX_BUCKETS] = {0};
+	size_t start_pos[RADIX_BUCKETS];
+	size_t next[RADIX_BUCKETS];
+	size_t i;
+	int b;
+
+	if (end - start <= 1 || byte_pos >= SORT_TAG_BYTES)
+		return;
+
+	for (i = start; i < end; i++)
+		count[radix_u32_byte(prefix_order_tag_get(&prefixes[i]),
+		                     byte_pos)]++;
+
+	start_pos[0] = start;
+	for (b = 1; b < RADIX_BUCKETS; b++)
+		start_pos[b] = start_pos[b - 1] + count[b - 1];
+
+	for (b = 0; b < RADIX_BUCKETS; b++)
+		next[b] = start_pos[b];
+
+	for (i = start; i < end;) {
+		uint8_t d;
+		size_t end_d;
+
+		d = radix_u32_byte(prefix_order_tag_get(&prefixes[i]),
+		                   byte_pos);
+		end_d = (d < RADIX_BUCKETS - 1) ? start_pos[d + 1] : end;
+
+		if (i >= start_pos[d] && i < end_d) {
+			i++;
+		} else {
+			prefix_swap(&prefixes[i], &prefixes[next[d]++]);
+		}
+	}
+
+	for (b = 0; b < RADIX_BUCKETS; b++) {
+		size_t seg_start;
+		size_t seg_end;
+
+		seg_start = start_pos[b];
+		seg_end = (b < RADIX_BUCKETS - 1) ? start_pos[b + 1] : end;
+		if (seg_end - seg_start > 1)
+			radix_sort_order_tags(prefixes, seg_start, seg_end,
+			                      byte_pos + 1);
+	}
+}
+
+/*
+ * prefixes_equal_key - compare two prefixes ignoring addr.family.
+ *
+ * The descending-prefix-length stability repair pass runs while addr.family
+ * temporarily stores the original input index, so duplicate detection must
+ * use only the documented public sort key.
+ */
+static bool
+prefixes_equal_key(const cidr_prefix_t *a, const cidr_prefix_t *b,
+                   size_t addr_len)
+{
+	const uint8_t *addr_a;
+	const uint8_t *addr_b;
+
+	addr_a = (const uint8_t *)&a->addr.addr;
+	addr_b = (const uint8_t *)&b->addr.addr;
+
+	return a->pfxlen == b->pfxlen && memcmp(addr_a, addr_b, addr_len) == 0;
+}
+
+/*
+ * prefixes_restore_desc_duplicate_order - repair exact-duplicate runs after
+ * the primary descending-prefix-length sort.
+ */
+static void
+prefixes_restore_desc_duplicate_order(cidr_prefix_t *prefixes, size_t count,
+                                      cidr_family_t family)
+{
+	size_t addr_len;
+	size_t run_start;
+	size_t run_end;
+
+	addr_len = radix_addr_len(family);
+
+	for (run_start = 0; run_start < count; run_start = run_end) {
+		run_end = run_start + 1;
+		while (run_end < count &&
+		       prefixes_equal_key(&prefixes[run_start],
+		                          &prefixes[run_end], addr_len))
+			run_end++;
+		if (run_end - run_start > 1)
+			radix_sort_order_tags(prefixes, run_start, run_end, 0);
+	}
+
+	prefixes_restore_family(prefixes, count, family);
 }
 
 /*
@@ -183,12 +361,12 @@ radix_sort_segment(cidr_prefix_t *prefixes, size_t start, size_t end,
  */
 void
 radix_sort_prefixes(cidr_prefix_t *prefixes, size_t count,
-                    cidr_sort_order_t order)
+                    cidr_sort_order_t order, cidr_family_t family)
 {
 	size_t addr_len;
 	size_t key_len;
 
-	addr_len = radix_addr_len(prefixes[0].addr.family);
+	addr_len = radix_addr_len(family);
 	key_len = addr_len + 1;
 
 	radix_sort_segment(prefixes, 0, count, 0, key_len, order, addr_len);
@@ -230,7 +408,16 @@ cidr_bulk_sort(cidr_prefix_t *prefixes, size_t count, cidr_sort_order_t order)
 			return CIDR_ERR_FAMILY;
 	}
 
-	radix_sort_prefixes(prefixes, count, order);
+	if (order == CIDR_SORT_PFXLEN_DESC) {
+		if (count > UINT32_MAX)
+			return CIDR_ERR_INVAL;
+		prefixes_prepare_order_tags(prefixes, count);
+		radix_sort_prefixes(prefixes, count, order, family);
+		prefixes_restore_desc_duplicate_order(prefixes, count, family);
+	} else {
+		radix_sort_prefixes(prefixes, count, order, family);
+	}
+
 	return CIDR_OK;
 }
 
@@ -323,7 +510,7 @@ cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
 			 * Parse failure: write error sentinel to output.
 			 * See ARCHITECTURE.md §5.2.
 			 */
-			out[i].family = CIDR_AF_UNSPEC;
+			out[i] = (cidr_addr_t){0};
 			has_parse_failure = true;
 
 			if (errs != NULL)
@@ -402,8 +589,11 @@ cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
 	 * See ARCHITECTURE.md §5.3.
 	 */
 	if (prefix_count == 0) {
-		for (i = 0; i < addr_count; i++)
+		for (i = 0; i < addr_count; i++) {
 			matches[i] = -1;
+			if (errs != NULL)
+				errs[i] = CIDR_OK;
+		}
 		return CIDR_OK;
 	}
 
@@ -441,8 +631,14 @@ cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
 	}
 
 	/* Address and prefix families must match */
-	if (addr_family != pfx_family)
+	if (addr_family != pfx_family) {
+		for (i = 0; i < addr_count; i++) {
+			matches[i] = -1;
+			if (errs != NULL)
+				errs[i] = CIDR_ERR_FAMILY;
+		}
 		return CIDR_ERR_FAMILY;
+	}
 
 	/*
 	 * For each address, scan prefixes in order. First match wins.
@@ -569,7 +765,7 @@ cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 	 * Step 1: Radix sort by CIDR_SORT_NETWORK_ASC.
 	 * See ARCHITECTURE.md §5.4 step 1.
 	 */
-	radix_sort_prefixes(prefixes, count, CIDR_SORT_NETWORK_ASC);
+	radix_sort_prefixes(prefixes, count, CIDR_SORT_NETWORK_ASC, family);
 
 	/*
 	 * Step 2: Remove exact duplicates (adjacent after sort).
