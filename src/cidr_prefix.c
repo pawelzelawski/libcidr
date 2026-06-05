@@ -283,3 +283,78 @@ cidr_prefix_from_host(const cidr_addr_t *addr, uint8_t pfxlen,
 	out->pfxlen = pfxlen;
 	return CIDR_OK;
 }
+
+/*
+ * cidr_prefix_format - format a CIDR prefix as canonical text.
+ *
+ * Writes the canonical CIDR string "address/prefixlen" into buf.
+ * Delegates address formatting to cidr_addr_format() and appends
+ * "/<prefixlen>" as a decimal integer with no leading zeros.
+ *
+ * prefix: pointer to a valid cidr_prefix_t
+ * buf:    caller-provided output buffer of size len
+ * len:    must be at least CIDR_PREFIX_STR_MAX (50)
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or buf is NULL, if
+ *   prefix->addr.family is CIDR_AF_UNSPEC, or if len < CIDR_PREFIX_STR_MAX.
+ *
+ * On failure, buf content is undefined.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.2.3.
+ */
+cidr_err_t
+cidr_prefix_format(const cidr_prefix_t *prefix, char *buf, size_t len)
+{
+	cidr_err_t rc;
+	size_t pos;
+	int val;
+	char tmp[4];
+	int n;
+
+	if (prefix == NULL || buf == NULL)
+		return CIDR_ERR_INVAL;
+	if (prefix->addr.family == CIDR_AF_UNSPEC)
+		return CIDR_ERR_INVAL;
+	if (len < CIDR_PREFIX_STR_MAX)
+		return CIDR_ERR_INVAL;
+
+	/*
+	 * Format the address portion. cidr_addr_format writes the
+	 * NUL-terminated canonical address into buf.
+	 * See ARCHITECTURE.md §4.2.3.
+	 */
+	rc = cidr_addr_format(&prefix->addr, buf, len);
+	if (rc != CIDR_OK)
+		return rc;
+
+	/* Find the NUL terminator to append "/<pfxlen>". */
+	pos = strlen(buf);
+	buf[pos++] = '/';
+
+	/*
+	 * SAFETY: CIDR_PREFIX_STR_MAX (50) accommodates the maximum
+	 * address text (45 chars per ARCHITECTURE.md §4.2) + '/' +
+	 * "128" (3 digits) + NUL = 50. The buffer check above ensures
+	 * sufficient space. Convert pfxlen to decimal with no leading
+	 * zeros. See ARCHITECTURE.md §4.2.3.
+	 */
+	val = (int)prefix->pfxlen;
+	n = 0;
+	if (val >= 100) {
+		tmp[n++] = (char)('0' + val / 100);
+		val %= 100;
+	}
+	if (val >= 10 || n > 0) {
+		tmp[n++] = (char)('0' + val / 10);
+		val %= 10;
+	}
+	tmp[n++] = (char)('0' + val);
+
+	for (int i = 0; i < n; i++)
+		buf[pos + (size_t)i] = tmp[i];
+	buf[pos + (size_t)n] = '\0';
+
+	return CIDR_OK;
+}

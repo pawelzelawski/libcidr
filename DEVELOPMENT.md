@@ -346,7 +346,7 @@ safely. Comparison returns results consistent with `CIDR_SORT_NETWORK_ASC`.
   - This function must not return `CIDR_ERR_HOSTBITS` -- zeroing is
     the explicit contract
 
-**3.3 -- `cidr_prefix_format()`**
+**3.3 -- `cidr_prefix_format()`** ✓ DONE
 - Implement `cidr_prefix_format()` in `src/cidr_prefix.c`
 - Delegate address formatting to `cidr_addr_format()` from Phase 2
 - Append `/prefixlen` as decimal integer with no leading zeros

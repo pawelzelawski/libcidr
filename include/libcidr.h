@@ -293,4 +293,30 @@ cidr_err_t cidr_prefix_from_host(const cidr_addr_t *addr, uint8_t pfxlen,
                                  cidr_prefix_t *out)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_prefix_format - format a CIDR prefix as canonical text.
+ *
+ * Writes the canonical CIDR string "address/prefixlen" into buf.
+ * The address portion is formatted per §4.2.1 or §4.2.2 depending
+ * on family. The prefix length is written as a decimal integer with
+ * no leading zeros. Example output: "192.168.1.0/24", "2001:db8::/32".
+ *
+ * prefix: pointer to a valid cidr_prefix_t (addr.family must be
+ *         CIDR_AF_INET or CIDR_AF_INET6)
+ * buf:    caller-provided output buffer; on success contains the
+ *         NUL-terminated canonical CIDR string
+ * len:    size of buf in bytes; must be at least CIDR_PREFIX_STR_MAX (50)
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or buf is NULL, if
+ *   prefix->addr.family is CIDR_AF_UNSPEC, or if len < CIDR_PREFIX_STR_MAX.
+ *
+ * On failure, buf content is undefined.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.2.3.
+ */
+cidr_err_t cidr_prefix_format(const cidr_prefix_t *prefix, char *buf,
+                              size_t len) __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */
