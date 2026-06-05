@@ -93,6 +93,9 @@ prefix_mask_apply(uint8_t pfxlen, cidr_addr_t *addr)
  * Returns CIDR_OK on success.
  * Returns CIDR_ERR_PFXLEN on any malformed input or overflow.
  */
+static cidr_err_t parse_pfxlen(const char *s, uint8_t *out)
+    __attribute__((warn_unused_result));
+
 static cidr_err_t
 parse_pfxlen(const char *s, uint8_t *out)
 {
@@ -830,8 +833,21 @@ cidr_subnet_iter_next(cidr_subnet_iter_t *iter, cidr_prefix_t *out)
 	 * bytes is correct for big-endian address ordering.
 	 * See ARCHITECTURE.md §4.3.8.
 	 */
-	if (memcmp(current_bytes, limit_bytes, addr_len) >= 0)
-		iter->done = true;
+	if (iter->limit.pfxlen == 0) {
+		/*
+		 * SAFETY: for a parent /0 prefix, the mathematical limit is
+		 * the first address past the full address space and cannot be
+		 * represented in cidr_addr_t. cidr_subnet_iter_init() stores
+		 * the wrapped start address in iter->limit instead. Iteration
+		 * is complete only when the incremented current address wraps
+		 * back to that stored start address.
+		 */
+		if (memcmp(current_bytes, limit_bytes, addr_len) == 0)
+			iter->done = true;
+	} else {
+		if (memcmp(current_bytes, limit_bytes, addr_len) >= 0)
+			iter->done = true;
+	}
 
 	return CIDR_OK;
 }

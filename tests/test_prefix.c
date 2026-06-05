@@ -16,6 +16,22 @@
 
 #include "../include/libcidr.h"
 
+static void
+expected_mask_bytes(uint8_t *bytes, size_t addr_len, uint8_t pfxlen)
+{
+	size_t full_bytes;
+	int rem;
+
+	full_bytes = (size_t)(pfxlen / 8);
+	rem = pfxlen % 8;
+
+	memset(bytes, 0x00, addr_len);
+	for (size_t i = 0; i < full_bytes && i < addr_len; i++)
+		bytes[i] = 0xFF;
+	if (full_bytes < addr_len && rem > 0)
+		bytes[full_bytes] = (uint8_t)(0xFF << (8 - rem));
+}
+
 int
 test_prefix_parse_valid(void)
 {
@@ -113,7 +129,9 @@ int
 test_prefix_from_host_zeroes_hostbits(void)
 {
 	cidr_addr_t addr;
+	cidr_addr_t mask;
 	cidr_prefix_t out;
+	uint8_t expected[16];
 
 	/* /0: all bytes zeroed */
 	addr.family = CIDR_AF_INET;
@@ -163,26 +181,57 @@ test_prefix_from_host_zeroes_hostbits(void)
 	    out.addr.addr.v4[2] != 1 || out.addr.addr.v4[3] != 0)
 		return 1;
 
-	/* IPv6 /0: all bytes zeroed */
-	cidr_addr_t v6_addr;
-	v6_addr.family = CIDR_AF_INET6;
-	memset(v6_addr.addr.v6, 0xFF, 16);
-	if (cidr_prefix_from_host(&v6_addr, 0, &out) != CIDR_OK)
-		return 1;
-	for (int i = 0; i < 16; i++) {
-		if (out.addr.addr.v6[i] != 0)
+	/*
+	 * Exhaustive IPv4 coverage required by TESTING.md §6.2:
+	 * verify zeroing for every prefix length 0-32.
+	 */
+	addr.family = CIDR_AF_INET;
+	addr.addr.v4[0] = 203;
+	addr.addr.v4[1] = 17;
+	addr.addr.v4[2] = 99;
+	addr.addr.v4[3] = 255;
+	for (uint8_t pfxlen = 0; pfxlen <= 32; pfxlen++) {
+		if (cidr_prefix_from_host(&addr, pfxlen, &out) != CIDR_OK)
 			return 1;
+		if (out.addr.family != CIDR_AF_INET || out.pfxlen != pfxlen)
+			return 1;
+		if (cidr_prefix_mask(&out, &mask) != CIDR_OK)
+			return 1;
+		expected_mask_bytes(expected, 4, pfxlen);
+		for (size_t i = 0; i < 4; i++) {
+			if (mask.addr.v4[i] != expected[i])
+				return 1;
+			if (out.addr.addr.v4[i] !=
+			    (uint8_t)(addr.addr.v4[i] & expected[i]))
+				return 1;
+		}
 	}
 
-	/* IPv6 /128: no bytes changed */
-	cidr_addr_t v6_specific;
-	v6_specific.family = CIDR_AF_INET6;
-	memset(v6_specific.addr.v6, 0, 16);
-	v6_specific.addr.v6[15] = 1;
-	if (cidr_prefix_from_host(&v6_specific, 128, &out) != CIDR_OK)
-		return 1;
-	if (out.addr.addr.v6[15] != 1)
-		return 1;
+	/*
+	 * Exhaustive IPv6 coverage required by TESTING.md §6.2:
+	 * verify zeroing for every prefix length 0-128.
+	 */
+	addr.family = CIDR_AF_INET6;
+	for (size_t i = 0; i < 16; i++)
+		addr.addr.v6[i] = (uint8_t)(0xFFu - (uint8_t)(i * 7u));
+	for (int pfxlen = 0; pfxlen <= 128; pfxlen++) {
+		if (cidr_prefix_from_host(&addr, (uint8_t)pfxlen, &out) !=
+		    CIDR_OK)
+			return 1;
+		if (out.addr.family != CIDR_AF_INET6 ||
+		    out.pfxlen != (uint8_t)pfxlen)
+			return 1;
+		if (cidr_prefix_mask(&out, &mask) != CIDR_OK)
+			return 1;
+		expected_mask_bytes(expected, 16, (uint8_t)pfxlen);
+		for (size_t i = 0; i < 16; i++) {
+			if (mask.addr.v6[i] != expected[i])
+				return 1;
+			if (out.addr.addr.v6[i] !=
+			    (uint8_t)(addr.addr.v6[i] & expected[i]))
+				return 1;
+		}
+	}
 
 	return 0;
 }
@@ -362,76 +411,38 @@ test_prefix_mask_all_lengths(void)
 {
 	cidr_prefix_t p;
 	cidr_addr_t out;
+	uint8_t expected[16];
 
-	/* IPv4: test key prefix lengths */
-	/* /0: all zeros */
+	/* Exhaustive IPv4 coverage: every prefix length 0-32. */
 	if (cidr_prefix_parse("0.0.0.0/0", &p) != CIDR_OK)
 		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	if (out.addr.v4[0] != 0 || out.addr.v4[1] != 0 || out.addr.v4[2] != 0 ||
-	    out.addr.v4[3] != 0)
-		return 1;
+	for (int pfxlen = 0; pfxlen <= 32; pfxlen++) {
+		p.pfxlen = (uint8_t)pfxlen;
+		if (cidr_prefix_mask(&p, &out) != CIDR_OK)
+			return 1;
+		if (out.family != CIDR_AF_INET)
+			return 1;
+		expected_mask_bytes(expected, 4, (uint8_t)pfxlen);
+		for (size_t i = 0; i < 4; i++) {
+			if (out.addr.v4[i] != expected[i])
+				return 1;
+		}
+	}
 
-	/* /1: 128.0.0.0 */
-	if (cidr_prefix_parse("0.0.0.0/1", &p) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	if (out.addr.v4[0] != 128 || out.addr.v4[1] != 0 ||
-	    out.addr.v4[2] != 0 || out.addr.v4[3] != 0)
-		return 1;
-
-	/* /24: 255.255.255.0 */
-	if (cidr_prefix_parse("0.0.0.0/24", &p) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	if (out.addr.v4[0] != 255 || out.addr.v4[1] != 255 ||
-	    out.addr.v4[2] != 255 || out.addr.v4[3] != 0)
-		return 1;
-
-	/* /32: all 0xFF */
-	if (cidr_prefix_parse("0.0.0.0/32", &p) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	if (out.addr.v4[0] != 255 || out.addr.v4[1] != 255 ||
-	    out.addr.v4[2] != 255 || out.addr.v4[3] != 255)
-		return 1;
-
-	/* IPv6: /0 all zeros */
+	/* Exhaustive IPv6 coverage: every prefix length 0-128. */
 	if (cidr_prefix_parse("::/0", &p) != CIDR_OK)
 		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	for (int i = 0; i < 16; i++) {
-		if (out.addr.v6[i] != 0)
+	for (int pfxlen = 0; pfxlen <= 128; pfxlen++) {
+		p.pfxlen = (uint8_t)pfxlen;
+		if (cidr_prefix_mask(&p, &out) != CIDR_OK)
 			return 1;
-	}
-
-	/* IPv6: /64 */
-	if (cidr_prefix_parse("::/64", &p) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	for (int i = 0; i < 8; i++) {
-		if (out.addr.v6[i] != 0xFF)
+		if (out.family != CIDR_AF_INET6)
 			return 1;
-	}
-	for (int i = 8; i < 16; i++) {
-		if (out.addr.v6[i] != 0x00)
-			return 1;
-	}
-
-	/* IPv6: /128 all 0xFF */
-	if (cidr_prefix_parse("::/128", &p) != CIDR_OK)
-		return 1;
-	if (cidr_prefix_mask(&p, &out) != CIDR_OK)
-		return 1;
-	for (int i = 0; i < 16; i++) {
-		if (out.addr.v6[i] != 0xFF)
-			return 1;
+		expected_mask_bytes(expected, 16, (uint8_t)pfxlen);
+		for (size_t i = 0; i < 16; i++) {
+			if (out.addr.v6[i] != expected[i])
+				return 1;
+		}
 	}
 
 	return 0;
@@ -804,6 +815,34 @@ test_subnet_iter_correct_count(void)
 	if (rc != CIDR_ERR_DONE)
 		return 1;
 	if (count != 16)
+		return 1;
+
+	/* IPv4: 0.0.0.0/0 -> /1 yields 2 subnets */
+	if (cidr_prefix_parse("0.0.0.0/0", &p) != CIDR_OK)
+		return 1;
+	if (cidr_subnet_iter_init(&iter, &p, 1) != CIDR_OK)
+		return 1;
+
+	count = 0;
+	while ((rc = cidr_subnet_iter_next(&iter, &subnet)) == CIDR_OK)
+		count++;
+	if (rc != CIDR_ERR_DONE)
+		return 1;
+	if (count != 2)
+		return 1;
+
+	/* IPv6: ::/0 -> /1 yields 2 subnets */
+	if (cidr_prefix_parse("::/0", &p) != CIDR_OK)
+		return 1;
+	if (cidr_subnet_iter_init(&iter, &p, 1) != CIDR_OK)
+		return 1;
+
+	count = 0;
+	while ((rc = cidr_subnet_iter_next(&iter, &subnet)) == CIDR_OK)
+		count++;
+	if (rc != CIDR_ERR_DONE)
+		return 1;
+	if (count != 2)
 		return 1;
 
 	return 0;
