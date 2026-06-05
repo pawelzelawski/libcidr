@@ -425,6 +425,223 @@ test_bulk_contains_family_mismatch(void)
 }
 
 /*
+ * test_bulk_aggregate_known_cases -- known aggregation cases verified
+ * against ipaddress.collapse_addresses reference results.
+ * See ARCHITECTURE.md §5.4.
+ */
+int
+test_bulk_aggregate_known_cases(void)
+{
+	cidr_prefix_t prefixes[4];
+	size_t out_count;
+	cidr_err_t rc;
+
+	/* Adjacent /24s → /22 */
+	if (cidr_prefix_parse("10.0.0.0/24", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.1.0/24", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.2.0/24", &prefixes[2]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.3.0/24", &prefixes[3]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 4, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "10.0.0.0/22") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_duplicate_removal -- exact duplicates removed
+ * before sibling merge.
+ */
+int
+test_bulk_aggregate_duplicate_removal(void)
+{
+	cidr_prefix_t prefixes[5];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/24", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.0.0/24", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.1.0/24", &prefixes[2]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.0.0/24", &prefixes[3]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.1.0/24", &prefixes[4]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 5, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+
+	/* After dedup: 10.0.0.0/24, 10.0.1.0/24 → merge to /23 */
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "10.0.0.0/23") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_containment_removal -- prefix covered by a shorter
+ * prefix is removed. See ARCHITECTURE.md §5.4 step 3.
+ */
+int
+test_bulk_aggregate_containment_removal(void)
+{
+	cidr_prefix_t prefixes[3];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.1.0.0/16", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.0.0.0/16", &prefixes[2]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 3, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+
+	/* /8 contains both /16s → only /8 remains */
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "10.0.0.0/8") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_sibling_merge -- adjacent /24 siblings merge to /23.
+ * See ARCHITECTURE.md §5.4 step 4.
+ */
+int
+test_bulk_aggregate_sibling_merge(void)
+{
+	cidr_prefix_t prefixes[2];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("192.168.0.0/24", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("192.168.1.0/24", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 2, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "192.168.0.0/23") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_early_termination -- already-aggregated input
+ * produces no merges and exits immediately. See ARCHITECTURE.md §5.4.
+ */
+int
+test_bulk_aggregate_early_termination(void)
+{
+	cidr_prefix_t prefixes[2];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("172.16.0.0/12", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 2, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 2)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_single_prefix -- single element is a no-op.
+ */
+int
+test_bulk_aggregate_single_prefix(void)
+{
+	cidr_prefix_t prefixes[1];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 1, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_null_out_count -- NULL out_count returns
+ * CIDR_ERR_INVAL. See ARCHITECTURE.md §5.4.
+ */
+int
+test_bulk_aggregate_null_out_count(void)
+{
+	if (cidr_bulk_aggregate(NULL, 0, NULL) != CIDR_ERR_INVAL)
+		return 1;
+	return 0;
+}
+
+/*
  * test_bulk_sort_empty -- count == 0 returns CIDR_OK without touching
  * the prefixes pointer. See ARCHITECTURE.md §3.4 empty array policy.
  */

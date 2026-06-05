@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 4 -- Bulk Engine (IN PROGRESS)
-**Next Task**: Phase 4.4 -- cidr_bulk_aggregate()
+**Next Task**: Phase 4.5 -- cidr_bulk_sort()
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
-| 4 | Bulk Engine | IN PROGRESS | 24/24 | Batch parse, containment, aggregation, sort |
+| 4 | Bulk Engine | IN PROGRESS | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
@@ -513,9 +513,9 @@ cases at count boundaries are handled.
 - When `addr_count > 0` and `matches` is NULL, return `CIDR_ERR_INVAL`
 - `errs` may be NULL
 
-**4.4 -- `cidr_bulk_aggregate()`**
+**4.4 -- `cidr_bulk_aggregate()`** ✓ DONE
 - Implement per ARCHITECTURE.md §5.4 five-step algorithm:
-  1. Radix sort the prefix array using the shared engine
+   1. Radix sort the prefix array using the shared engine
      (`CIDR_SORT_NETWORK_ASC` key)
   2. Linear scan: remove exact duplicates
   3. Linear scan: remove prefixes already covered by a shorter prefix

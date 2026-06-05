@@ -101,6 +101,13 @@ extern int test_bulk_contains_lpm_with_sorted_table(void);
 extern int test_bulk_contains_empty_prefix_table(void);
 extern int test_bulk_contains_null_matches_nonzero_count(void);
 extern int test_bulk_contains_family_mismatch(void);
+extern int test_bulk_aggregate_known_cases(void);
+extern int test_bulk_aggregate_duplicate_removal(void);
+extern int test_bulk_aggregate_containment_removal(void);
+extern int test_bulk_aggregate_sibling_merge(void);
+extern int test_bulk_aggregate_early_termination(void);
+extern int test_bulk_aggregate_single_prefix(void);
+extern int test_bulk_aggregate_null_out_count(void);
 extern int test_bulk_sort_empty(void);
 extern int test_bulk_sort_single(void);
 extern int test_bulk_sort_invalid_order(void);
@@ -234,6 +241,19 @@ main(void)
 	    test_bulk_contains_null_matches_nonzero_count);
 	RUN("test_bulk_contains_family_mismatch",
 	    test_bulk_contains_family_mismatch);
+	RUN("test_bulk_aggregate_known_cases", test_bulk_aggregate_known_cases);
+	RUN("test_bulk_aggregate_duplicate_removal",
+	    test_bulk_aggregate_duplicate_removal);
+	RUN("test_bulk_aggregate_containment_removal",
+	    test_bulk_aggregate_containment_removal);
+	RUN("test_bulk_aggregate_sibling_merge",
+	    test_bulk_aggregate_sibling_merge);
+	RUN("test_bulk_aggregate_early_termination",
+	    test_bulk_aggregate_early_termination);
+	RUN("test_bulk_aggregate_single_prefix",
+	    test_bulk_aggregate_single_prefix);
+	RUN("test_bulk_aggregate_null_out_count",
+	    test_bulk_aggregate_null_out_count);
 	RUN("test_bulk_sort_empty", test_bulk_sort_empty);
 	RUN("test_bulk_sort_single", test_bulk_sort_single);
 	RUN("test_bulk_sort_invalid_order", test_bulk_sort_invalid_order);

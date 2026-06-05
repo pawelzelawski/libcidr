@@ -687,4 +687,41 @@ cidr_err_t cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
                               cidr_err_t *errs)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_bulk_aggregate - aggregate a prefix array to a minimal covering set.
+ *
+ * Aggregates prefixes in place using a five-step algorithm: radix sort,
+ * duplicate removal, containment removal, and repeated sibling merge with
+ * early termination. The result covers exactly the same address space as
+ * the input -- no more, no less.
+ *
+ * On return, the first *out_count entries are the aggregated prefixes;
+ * the remaining entries are undefined.
+ *
+ * prefixes:  caller-provided prefix array; modified in place
+ * count:     number of entries in prefixes
+ * out_count: receives the number of prefixes in the aggregated result;
+ *            must not be NULL
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefixes or out_count is NULL, or if any
+ *   prefix has addr.family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the array contains mixed IPv4 and IPv6
+ *   prefixes.
+ *
+ * When count == 0, writes 0 to *out_count and returns CIDR_OK.
+ *
+ * The caller's array is modified directly. If the original must be
+ * preserved, copy the array before calling.
+ *
+ * Complexity: O(n * k) where k is key width in bytes (5 for IPv4, 17 for
+ * IPv6); treated as O(n) because k is a compile-time constant.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.4 for the aggregation algorithm.
+ */
+cidr_err_t cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count,
+                               size_t *out_count)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

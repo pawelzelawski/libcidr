@@ -5,11 +5,11 @@
  * cidr_bulk_aggregate(), and cidr_bulk_sort(). Contains the shared
  * in-place MSD radix sort engine.
  *
- * cidr_bulk_parse() and cidr_bulk_contains() are implemented in this
- * phase. See ARCHITECTURE.md §5.2 for batch parse and §5.3 for bulk
- * containment.
+ * All four public bulk functions are implemented.
  * See ARCHITECTURE.md §5 for the bulk engine specification.
  */
+
+#include <string.h>
 
 #include "../include/libcidr.h"
 #include "cidr_internal.h"
@@ -467,5 +467,185 @@ cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
 			errs[i] = CIDR_OK;
 	}
 
+	return CIDR_OK;
+}
+
+/*
+ * prefixes_are_siblings - check whether two prefixes are mergeable
+ *                         siblings (same pfxlen, same supernet).
+ *
+ * Two prefixes are siblings if they have equal prefix length (greater
+ * than zero) and their supernets at pfxlen - 1 are identical.
+ * See ARCHITECTURE.md §5.4 sibling merge.
+ */
+static bool
+prefixes_are_siblings(const cidr_prefix_t *a, const cidr_prefix_t *b)
+{
+	cidr_prefix_t super_a, super_b;
+	size_t addr_len;
+
+	if (a->pfxlen != b->pfxlen || a->pfxlen == 0)
+		return false;
+	if (a->addr.family != b->addr.family)
+		return false;
+
+	/*
+	 * SAFETY: pfxlen > 0 ensures cidr_prefix_supernet will not return
+	 * CIDR_ERR_OVERFLOW. Both prefixes have valid, matching families.
+	 */
+	if (cidr_prefix_supernet(a, &super_a) != CIDR_OK)
+		return false;
+	if (cidr_prefix_supernet(b, &super_b) != CIDR_OK)
+		return false;
+
+	addr_len = (super_a.addr.family == CIDR_AF_INET) ? 4 : 16;
+
+	return super_a.pfxlen == super_b.pfxlen &&
+	       memcmp(&super_a.addr.addr, &super_b.addr.addr, addr_len) == 0;
+}
+
+/*
+ * cidr_bulk_aggregate - aggregate a prefix array to a minimal covering set.
+ *
+ * Operates in place using the five-step algorithm from ARCHITECTURE.md §5.4:
+ * 1. Radix sort by CIDR_SORT_NETWORK_ASC (addr asc, pfxlen asc)
+ * 2. Remove exact duplicates
+ * 3. Remove prefixes covered by a shorter prefix
+ * 4. Merge adjacent sibling prefixes; repeat until no merges occur
+ * 5. Early termination (built into step 4)
+ *
+ * The result covers exactly the same address space as the input. On return,
+ * the first *out_count entries are the aggregated prefixes; the remaining
+ * entries are undefined.
+ *
+ * prefixes:  caller-provided prefix array; modified in place
+ * count:     number of entries in prefixes
+ * out_count: receives the number of prefixes in the aggregated result;
+ *            must not be NULL
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefixes or out_count is NULL, or if any
+ *   prefix has addr.family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the array contains mixed families.
+ *
+ * When count == 0, writes 0 to *out_count and returns CIDR_OK.
+ *
+ * Complexity: O(n * k) where k is key width in bytes (5 for IPv4, 17 for
+ * IPv6); treated as O(n) because k is a compile-time constant.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.4 for the aggregation algorithm.
+ */
+cidr_err_t
+cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
+{
+	cidr_family_t family;
+	size_t i;
+	size_t write_idx;
+	bool merged;
+	int cmp;
+
+	if (out_count == NULL)
+		return CIDR_ERR_INVAL;
+	if (count == 0) {
+		*out_count = 0;
+		return CIDR_OK;
+	}
+	if (prefixes == NULL)
+		return CIDR_ERR_INVAL;
+
+	/* Validate family consistency */
+	family = prefixes[0].addr.family;
+	if (family != CIDR_AF_INET && family != CIDR_AF_INET6)
+		return CIDR_ERR_INVAL;
+	for (i = 1; i < count; i++) {
+		if (prefixes[i].addr.family == CIDR_AF_UNSPEC)
+			return CIDR_ERR_INVAL;
+		if (prefixes[i].addr.family != family)
+			return CIDR_ERR_FAMILY;
+	}
+
+	/*
+	 * Step 1: Radix sort by CIDR_SORT_NETWORK_ASC.
+	 * See ARCHITECTURE.md §5.4 step 1.
+	 */
+	radix_sort_prefixes(prefixes, count, CIDR_SORT_NETWORK_ASC);
+
+	/*
+	 * Step 2: Remove exact duplicates (adjacent after sort).
+	 * See ARCHITECTURE.md §5.4 step 2.
+	 */
+	write_idx = 0;
+	for (i = 1; i < count; i++) {
+		if (cidr_prefix_cmp(&prefixes[write_idx], &prefixes[i], &cmp) !=
+		        CIDR_OK ||
+		    cmp != 0) {
+			write_idx++;
+			if (write_idx != i)
+				prefixes[write_idx] = prefixes[i];
+		}
+	}
+	count = write_idx + 1;
+
+	/*
+	 * Step 3: Remove prefixes covered by a shorter prefix.
+	 * Uses single-pointer scan: any prefix contained by the most
+	 * recently kept prefix is redundant. See ARCHITECTURE.md §5.4
+	 * step 3.
+	 *
+	 * SAFETY: after the sort, all prefixes within a given prefix's
+	 * range appear contiguously, so a single covering pointer suffices
+	 * for the linear scan.
+	 */
+	write_idx = 0;
+	for (i = 1; i < count; i++) {
+		bool contained;
+
+		if (cidr_prefix_contains(&prefixes[write_idx],
+		                         &prefixes[i].addr,
+		                         &contained) == CIDR_OK &&
+		    contained)
+			continue;
+
+		write_idx++;
+		if (write_idx != i)
+			prefixes[write_idx] = prefixes[i];
+	}
+	count = write_idx + 1;
+
+	/*
+	 * Step 4 & 5: Merge adjacent sibling prefixes repeatedy until
+	 * no merges occur (early termination). See ARCHITECTURE.md §5.4
+	 * steps 4-5.
+	 */
+	do {
+		merged = false;
+		write_idx = 0;
+
+		for (i = 0; i < count; i++) {
+			if (write_idx > 0 &&
+			    prefixes_are_siblings(&prefixes[write_idx - 1],
+			                          &prefixes[i])) {
+				cidr_prefix_t super;
+
+				/*
+				 * SAFETY: prefixes_are_siblings confirmed
+				 * pfxlen > 0 and matching supernets --
+				 * cidr_prefix_supernet cannot fail here.
+				 */
+				(void)cidr_prefix_supernet(&prefixes[i],
+				                           &super);
+				prefixes[write_idx - 1] = super;
+				merged = true;
+			} else {
+				if (write_idx != i)
+					prefixes[write_idx] = prefixes[i];
+				write_idx++;
+			}
+		}
+		count = write_idx;
+	} while (merged);
+
+	*out_count = count;
 	return CIDR_OK;
 }
