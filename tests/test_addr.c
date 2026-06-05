@@ -15,7 +15,8 @@
  * test_ipv4_parse_valid - representative valid inputs and boundary
  * addresses per TESTING.md §3.1.
  */
-int test_ipv4_parse_valid(void)
+int
+test_ipv4_parse_valid(void)
 {
 	cidr_addr_t out;
 
@@ -62,7 +63,8 @@ int test_ipv4_parse_valid(void)
  * Leading zeros are ambiguous (some parsers treat them as octal)
  * and are rejected by the strict parser. See ARCHITECTURE.md §4.1.1.
  */
-int test_ipv4_parse_leading_zero(void)
+int
+test_ipv4_parse_leading_zero(void)
 {
 	cidr_addr_t out;
 
@@ -81,7 +83,8 @@ int test_ipv4_parse_leading_zero(void)
 /*
  * test_ipv4_parse_hex - reject hex notation per TESTING.md §3.1.
  */
-int test_ipv4_parse_hex(void)
+int
+test_ipv4_parse_hex(void)
 {
 	cidr_addr_t out;
 
@@ -99,7 +102,8 @@ int test_ipv4_parse_hex(void)
  * test_ipv4_parse_out_of_range - reject octet values exceeding 255
  * per TESTING.md §3.1.
  */
-int test_ipv4_parse_out_of_range(void)
+int
+test_ipv4_parse_out_of_range(void)
 {
 	cidr_addr_t out;
 
@@ -117,7 +121,8 @@ int test_ipv4_parse_out_of_range(void)
  * test_ipv4_parse_wrong_count - reject fewer or more than four octets
  * per TESTING.md §3.1.
  */
-int test_ipv4_parse_wrong_count(void)
+int
+test_ipv4_parse_wrong_count(void)
 {
 	cidr_addr_t out;
 
@@ -137,7 +142,8 @@ int test_ipv4_parse_wrong_count(void)
  * test_ipv4_parse_empty - reject empty string per TESTING.md §3.1.
  * An empty string has zero octets -- below the minimum of four.
  */
-int test_ipv4_parse_empty(void)
+int
+test_ipv4_parse_empty(void)
 {
 	cidr_addr_t out;
 
@@ -151,7 +157,8 @@ int test_ipv4_parse_empty(void)
  * test_ipv4_parse_whitespace - reject leading and trailing whitespace
  * per TESTING.md §3.1.
  */
-int test_ipv4_parse_whitespace(void)
+int
+test_ipv4_parse_whitespace(void)
 {
 	cidr_addr_t out;
 
@@ -169,7 +176,8 @@ int test_ipv4_parse_whitespace(void)
  * test_ipv4_parse_trailing_chars - reject characters after the
  * final octet per TESTING.md §3.1.
  */
-int test_ipv4_parse_trailing_chars(void)
+int
+test_ipv4_parse_trailing_chars(void)
 {
 	cidr_addr_t out;
 
@@ -189,7 +197,8 @@ int test_ipv4_parse_trailing_chars(void)
  * test_ipv4_parse_null - verify CIDR_ERR_INVAL for NULL pointers
  * per TESTING.md §3.1 and ARCHITECTURE.md §4.1.1.
  */
-int test_ipv4_parse_null(void)
+int
+test_ipv4_parse_null(void)
 {
 	cidr_addr_t out;
 
@@ -207,7 +216,8 @@ int test_ipv4_parse_null(void)
  * test_ipv6_parse_full_form - verify that the full 8-group form
  * is accepted per RFC 4291 §2.2. See TESTING.md §3.2.
  */
-int test_ipv6_parse_full_form(void)
+int
+test_ipv6_parse_full_form(void)
 {
 	cidr_addr_t out;
 	uint8_t expected[16] = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
@@ -239,7 +249,8 @@ int test_ipv6_parse_full_form(void)
  * test_ipv6_parse_compressed - verify that :: compression at
  * various positions is accepted. See TESTING.md §3.2.
  */
-int test_ipv6_parse_compressed(void)
+int
+test_ipv6_parse_compressed(void)
 {
 	cidr_addr_t out;
 	uint8_t expect_loopback[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -285,7 +296,8 @@ int test_ipv6_parse_compressed(void)
  * test_ipv6_parse_double_colon_once - reject :: appearing more than
  * once. See TESTING.md §3.2, RFC 4291 §2.2.
  */
-int test_ipv6_parse_double_colon_once(void)
+int
+test_ipv6_parse_double_colon_once(void)
 {
 	cidr_addr_t out;
 
@@ -302,7 +314,8 @@ int test_ipv6_parse_double_colon_once(void)
  * hex input is accepted and stored as correct binary values.
  * See TESTING.md §3.2, RFC 5952 §4.3.
  */
-int test_ipv6_parse_uppercase_normalised(void)
+int
+test_ipv6_parse_uppercase_normalised(void)
 {
 	cidr_addr_t out;
 	uint8_t expected[16] = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
@@ -337,7 +350,8 @@ int test_ipv6_parse_uppercase_normalised(void)
  * notation is accepted for IPv4-mapped addresses.
  * See TESTING.md §3.2, RFC 5952 §5.
  */
-int test_ipv6_parse_mixed_mapped(void)
+int
+test_ipv6_parse_mixed_mapped(void)
 {
 	cidr_addr_t out;
 
@@ -366,7 +380,8 @@ int test_ipv6_parse_mixed_mapped(void)
  * the hex prefix does NOT match the IPv4-mapped prefix.
  * See TESTING.md §3.2, RFC 5952 §5.
  */
-int test_ipv6_parse_mixed_non_mapped(void)
+int
+test_ipv6_parse_mixed_non_mapped(void)
 {
 	cidr_addr_t out;
 
@@ -384,7 +399,8 @@ int test_ipv6_parse_mixed_non_mapped(void)
  * ::x.x.x.x where x.x.x.x != 0.0.0.0.
  * See TESTING.md §3.2.
  */
-int test_ipv6_parse_compatible_rejected(void)
+int
+test_ipv6_parse_compatible_rejected(void)
 {
 	cidr_addr_t out;
 
@@ -401,7 +417,8 @@ int test_ipv6_parse_compatible_rejected(void)
  * test_ipv6_parse_wrong_group_count - reject too many or too few
  * hex groups. See TESTING.md §3.2.
  */
-int test_ipv6_parse_wrong_group_count(void)
+int
+test_ipv6_parse_wrong_group_count(void)
 {
 	cidr_addr_t out;
 
@@ -432,7 +449,8 @@ int test_ipv6_parse_wrong_group_count(void)
  * test_ipv6_parse_group_too_large - reject hex group values
  * exceeding 0xFFFF (16-bit range). See TESTING.md §3.2.
  */
-int test_ipv6_parse_group_too_large(void)
+int
+test_ipv6_parse_group_too_large(void)
 {
 	cidr_addr_t out;
 
@@ -448,7 +466,8 @@ int test_ipv6_parse_group_too_large(void)
  * test_ipv6_parse_invalid_chars - reject inputs with invalid
  * characters in the hex part.
  */
-int test_ipv6_parse_invalid_chars(void)
+int
+test_ipv6_parse_invalid_chars(void)
 {
 	cidr_addr_t out;
 
@@ -467,7 +486,8 @@ int test_ipv6_parse_invalid_chars(void)
  * correct dotted-decimal with no leading zeros.
  * See TESTING.md §3.3, ARCHITECTURE.md §4.2.1.
  */
-int test_ipv4_format_canonical(void)
+int
+test_ipv4_format_canonical(void)
 {
 	static const struct {
 		const char *input;
@@ -503,7 +523,8 @@ int test_ipv4_format_canonical(void)
  * test_ipv4_format_roundtrip - verify parse/format/parse produces
  * bit-identical bytes. See TESTING.md §6.1.
  */
-int test_ipv4_format_roundtrip(void)
+int
+test_ipv4_format_roundtrip(void)
 {
 	static const char *cases[] = {
 	    "192.168.1.1", "0.0.0.0", "255.255.255.255", "10.0.0.1",
@@ -530,7 +551,8 @@ int test_ipv4_format_roundtrip(void)
  * are suppressed per RFC 5952 §4.1.
  * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 1.
  */
-int test_ipv6_format_rfc5952_leading_zeros(void)
+int
+test_ipv6_format_rfc5952_leading_zeros(void)
 {
 	static const struct {
 		const char *input;
@@ -561,7 +583,8 @@ int test_ipv6_format_rfc5952_leading_zeros(void)
  * run of consecutive zero groups is compressed with ::.
  * See TESTING.md §3.3, RFC 5952 §4.2.1, ARCHITECTURE.md §4.2.2 rule 2.
  */
-int test_ipv6_format_rfc5952_compress_longest(void)
+int
+test_ipv6_format_rfc5952_compress_longest(void)
 {
 	static const struct {
 		const char *input;
@@ -594,7 +617,8 @@ int test_ipv6_format_rfc5952_compress_longest(void)
  * zero group is written as "0", not compressed with ::.
  * See TESTING.md §3.3, RFC 5952 §4.2.2, ARCHITECTURE.md §4.2.2 rule 3.
  */
-int test_ipv6_format_rfc5952_no_compress_single(void)
+int
+test_ipv6_format_rfc5952_no_compress_single(void)
 {
 	cidr_addr_t addr;
 	char buf[CIDR_ADDR_STR_MAX];
@@ -620,7 +644,8 @@ int test_ipv6_format_rfc5952_no_compress_single(void)
  * consecutive zero runs are equal length, the first is compressed.
  * See TESTING.md §3.3, RFC 5952 §4.2.3, ARCHITECTURE.md §4.2.2 rule 4.
  */
-int test_ipv6_format_rfc5952_tie_first_wins(void)
+int
+test_ipv6_format_rfc5952_tie_first_wins(void)
 {
 	cidr_addr_t addr;
 	char buf[CIDR_ADDR_STR_MAX];
@@ -645,7 +670,8 @@ int test_ipv6_format_rfc5952_tie_first_wins(void)
  * lowercase per RFC 5952 §4.3.
  * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 5.
  */
-int test_ipv6_format_rfc5952_lowercase(void)
+int
+test_ipv6_format_rfc5952_lowercase(void)
 {
 	cidr_addr_t addr;
 	char buf[CIDR_ADDR_STR_MAX];
@@ -674,7 +700,8 @@ int test_ipv6_format_rfc5952_lowercase(void)
  * format with a dotted-decimal tail per RFC 5952 §5.
  * See TESTING.md §3.3, ARCHITECTURE.md §4.2.2 rule 6.
  */
-int test_ipv6_format_rfc5952_mixed_mapped(void)
+int
+test_ipv6_format_rfc5952_mixed_mapped(void)
 {
 	cidr_addr_t addr;
 	char buf[CIDR_ADDR_STR_MAX];
@@ -712,7 +739,8 @@ int test_ipv6_format_rfc5952_mixed_mapped(void)
  * bit-identical bytes for representative IPv6 addresses.
  * See TESTING.md §6.1, ARCHITECTURE.md §4.2.
  */
-int test_ipv6_format_roundtrip(void)
+int
+test_ipv6_format_roundtrip(void)
 {
 	static const char *cases[] = {"2001:db8::1",
 	                              "::1",
@@ -747,7 +775,8 @@ int test_ipv6_format_roundtrip(void)
  * the output buffer is smaller than CIDR_ADDR_STR_MAX.
  * See ARCHITECTURE.md §4.2.
  */
-int test_addr_format_buffer_too_small(void)
+int
+test_addr_format_buffer_too_small(void)
 {
 	cidr_addr_t addr;
 	char small_buf[16];
@@ -767,12 +796,14 @@ int test_addr_format_buffer_too_small(void)
 	    CIDR_ERR_INVAL)
 		return 1;
 
-	/* CIDR_AF_UNSPEC: must return CIDR_ERR_INVAL per ARCHITECTURE.md §4.2.1 */
+	/* CIDR_AF_UNSPEC: must return CIDR_ERR_INVAL per ARCHITECTURE.md §4.2.1
+	 */
 	{
 		cidr_addr_t unspec = {0};
 		char buf2[CIDR_ADDR_STR_MAX];
 
-		if (cidr_addr_format(&unspec, buf2, sizeof(buf2)) != CIDR_ERR_INVAL)
+		if (cidr_addr_format(&unspec, buf2, sizeof(buf2)) !=
+		    CIDR_ERR_INVAL)
 			return 1;
 	}
 
@@ -784,7 +815,8 @@ int test_addr_format_buffer_too_small(void)
  * are extracted from an IPv4-mapped IPv6 address.
  * See TESTING.md §6.7, ARCHITECTURE.md §4.1.3.
  */
-int test_addr_to_v4_valid_extraction(void)
+int
+test_addr_to_v4_valid_extraction(void)
 {
 	cidr_addr_t mapped, out;
 
@@ -829,7 +861,8 @@ int test_addr_to_v4_valid_extraction(void)
  *
  * See TESTING.md §6.7, ARCHITECTURE.md §4.1.3.
  */
-int test_addr_to_v4_error_distinction(void)
+int
+test_addr_to_v4_error_distinction(void)
 {
 	cidr_addr_t unspec = {0};
 	cidr_addr_t ipv4, unmapped, out;
@@ -865,7 +898,8 @@ int test_addr_to_v4_error_distinction(void)
  * equality for addresses within the same family.
  * See TESTING.md §3, ARCHITECTURE.md §4.4.
  */
-int test_addr_cmp_same_family(void)
+int
+test_addr_cmp_same_family(void)
 {
 	cidr_addr_t a, b, c;
 	int result;
@@ -953,7 +987,8 @@ int test_addr_cmp_same_family(void)
  * comparing an IPv4 address with an IPv6 address.
  * See ARCHITECTURE.md §4.4.
  */
-int test_addr_cmp_family_mismatch(void)
+int
+test_addr_cmp_family_mismatch(void)
 {
 	cidr_addr_t ipv4, ipv6;
 	int result;
@@ -974,7 +1009,8 @@ int test_addr_cmp_family_mismatch(void)
  * addresses have CIDR_AF_UNSPEC family or pointers are NULL.
  * See ARCHITECTURE.md §4.4.
  */
-int test_addr_cmp_unspec(void)
+int
+test_addr_cmp_unspec(void)
 {
 	cidr_addr_t valid = {0}, unspec = {0};
 	int result;

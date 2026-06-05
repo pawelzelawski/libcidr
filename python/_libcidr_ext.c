@@ -34,7 +34,8 @@ static struct PyModuleDef libcidr_module = {
     NULL  /* m_free */
 };
 
-PyMODINIT_FUNC PyInit_libcidr(void)
+PyMODINIT_FUNC
+PyInit_libcidr(void)
 {
 	return PyModule_Create(&libcidr_module);
 }

@@ -46,8 +46,7 @@ hex_val(int c)
  *
  * See ARCHITECTURE.md §4.1.1 for the full rejection case table.
  */
-static cidr_err_t
-addr_parse_ipv4(const char *src, cidr_addr_t *out)
+static cidr_err_t addr_parse_ipv4(const char *src, cidr_addr_t *out)
     __attribute__((warn_unused_result));
 
 static cidr_err_t
@@ -129,8 +128,7 @@ addr_parse_ipv4(const char *src, cidr_addr_t *out)
  * Returns CIDR_OK on success.
  * Returns CIDR_ERR_PARSE on malformed input.
  */
-static cidr_err_t
-ipv4_suffix_parse(const char *suffix, uint8_t *octets)
+static cidr_err_t ipv4_suffix_parse(const char *suffix, uint8_t *octets)
     __attribute__((warn_unused_result));
 
 static cidr_err_t
@@ -233,8 +231,7 @@ is_mixed_suffix(const char *s)
  *
  * See ARCHITECTURE.md §4.1.2 for the full IPv6 parsing specification.
  */
-static cidr_err_t
-addr_parse_ipv6(const char *src, cidr_addr_t *out)
+static cidr_err_t addr_parse_ipv6(const char *src, cidr_addr_t *out)
     __attribute__((warn_unused_result));
 
 static cidr_err_t
@@ -709,8 +706,7 @@ find_zero_compress(const uint16_t *groups, int *run_len)
  *
  * See ARCHITECTURE.md §4.2.1.
  */
-static cidr_err_t
-addr_format_ipv4(const cidr_addr_t *addr, char *buf)
+static cidr_err_t addr_format_ipv4(const cidr_addr_t *addr, char *buf)
     __attribute__((warn_unused_result));
 
 static cidr_err_t
@@ -750,8 +746,7 @@ addr_format_ipv4(const cidr_addr_t *addr, char *buf)
  *
  * See ARCHITECTURE.md §4.2.2.
  */
-static cidr_err_t
-addr_format_ipv6(const cidr_addr_t *addr, char *buf)
+static cidr_err_t addr_format_ipv6(const cidr_addr_t *addr, char *buf)
     __attribute__((warn_unused_result));
 
 static cidr_err_t

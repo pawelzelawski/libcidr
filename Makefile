@@ -105,6 +105,7 @@ INCLUDES = -I include/
 PY        != command -v python3 2>/dev/null || echo python3
 PYCONFIG  != command -v python3-config 2>/dev/null || echo python3-config
 PYINC     != $(PYCONFIG) --includes 2>/dev/null || echo ""
+PYINC_TIDY != $(PYCONFIG) --includes 2>/dev/null | sed 's/-I/-isystem /g'
 
 # Stable ABI extension: .abi3.so suffix, no version-specific tag.
 PYEXT_ABI3 = libcidr.abi3.so
@@ -236,12 +237,13 @@ bench-python:
 # --- lint: clang-tidy + cppcheck -----------------------------------------------
 
 lint:
-	clang-tidy $(LIB_SRCS) python/_libcidr_ext.c		\
-	    -- $(CFLAGS_DEV) $(INCLUDES) $(PYINC)
+	clang-tidy --quiet $(LIB_SRCS) python/_libcidr_ext.c	\
+	    -- $(CFLAGS_DEV) $(INCLUDES) $(PYINC_TIDY)
 	@if command -v cppcheck >/dev/null 2>&1; then \
 	    cppcheck --enable=all --error-exitcode=1		\
 	             --suppress=missingIncludeSystem		\
 	             --suppress=unusedFunction			\
+	             --suppress=checkersReport			\
 	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \
