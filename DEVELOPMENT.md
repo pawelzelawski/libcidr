@@ -2,15 +2,15 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 2 - Address Arithmetic Engine
-**Next Task**: Phase 2.4 -- IPv4 and IPv6 formatting
+**Current Phase**: Phase 2 - Address Arithmetic Engine (COMPLETE)
+**Next Task**: Phase 3.1 -- cidr_prefix_t and cidr_sort_order_t
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
-| 2 | Address Arithmetic Engine | IN PROGRESS | 0/0 | Parse, format, extraction, comparison |
+| 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | PENDING | 0/0 | Parse, arithmetic ops, subnet iterator |
 | 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
@@ -229,7 +229,7 @@ targets.
 - `len` parameter checked against `CIDR_ADDR_STR_MAX`; returns
   `CIDR_ERR_INVAL` if buffer is too small
 
-**2.5 -- `cidr_addr_to_v4()`**
+**2.5 -- `cidr_addr_to_v4()`** ✓ DONE
 - Implement per ARCHITECTURE.md §4.1.3
 - Distinguish three error conditions precisely:
   - `addr->family == CIDR_AF_UNSPEC`: return `CIDR_ERR_INVAL`
@@ -240,7 +240,7 @@ targets.
 - On success: write `out` with `family = CIDR_AF_INET` and the 4 extracted
   bytes from positions 12-15 of `addr.v6`
 
-**2.6 -- `cidr_addr_cmp()`**
+**2.6 -- `cidr_addr_cmp()`** ✓ DONE
 - Implement per ARCHITECTURE.md §4.4
 - Lexicographic comparison of address bytes in network byte order within
   the same family
@@ -289,11 +289,11 @@ Per TESTING.md §3, every RFC conformance test case has its own named test:
 
 ### Phase 2 Completion Criteria
 
-- [ ] All test_addr.c tests pass on all four targets
-- [ ] Valgrind clean on Linux (no leaks; cidr_addr.c allocates nothing)
-- [ ] ASan/UBSan clean on both platforms
-- [ ] Memory discipline check: `grep -n "malloc\|free" src/cidr_addr.c` -- empty
-- [ ] Quality milestones M9 (RFC conformance) partially confirmed:
+- [x] All test_addr.c tests pass on all four targets
+- [x] Valgrind clean on Linux (no leaks; cidr_addr.c allocates nothing)
+- [x] ASan/UBSan clean on both platforms
+- [x] Memory discipline check: `grep -n "malloc\|free" src/cidr_addr.c` -- empty
+- [x] Quality milestones M9 (RFC conformance) partially confirmed:
       IPv4 and IPv6 parse/format RFC tests all passing
 
 ---

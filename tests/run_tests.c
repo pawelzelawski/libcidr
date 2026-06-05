@@ -37,6 +37,11 @@ extern int test_ipv6_format_rfc5952_lowercase(void);
 extern int test_ipv6_format_rfc5952_mixed_mapped(void);
 extern int test_ipv6_format_roundtrip(void);
 extern int test_addr_format_buffer_too_small(void);
+extern int test_addr_to_v4_valid_extraction(void);
+extern int test_addr_to_v4_error_distinction(void);
+extern int test_addr_cmp_same_family(void);
+extern int test_addr_cmp_family_mismatch(void);
+extern int test_addr_cmp_unspec(void);
 
 int tests_run = 0;
 int tests_passed = 0;
@@ -83,6 +88,13 @@ int main(void)
 	RUN("test_ipv6_format_roundtrip", test_ipv6_format_roundtrip);
 	RUN("test_addr_format_buffer_too_small",
 	    test_addr_format_buffer_too_small);
+	RUN("test_addr_to_v4_valid_extraction",
+	    test_addr_to_v4_valid_extraction);
+	RUN("test_addr_to_v4_error_distinction",
+	    test_addr_to_v4_error_distinction);
+	RUN("test_addr_cmp_same_family", test_addr_cmp_same_family);
+	RUN("test_addr_cmp_family_mismatch", test_addr_cmp_family_mismatch);
+	RUN("test_addr_cmp_unspec", test_addr_cmp_unspec);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

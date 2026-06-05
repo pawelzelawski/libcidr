@@ -755,3 +755,228 @@ int test_addr_format_buffer_too_small(void)
 
 	return 0;
 }
+
+/*
+ * test_addr_to_v4_valid_extraction - verify correct IPv4 bytes
+ * are extracted from an IPv4-mapped IPv6 address.
+ * See TESTING.md §6.7, ARCHITECTURE.md §4.1.3.
+ */
+int test_addr_to_v4_valid_extraction(void)
+{
+	cidr_addr_t mapped, out;
+
+	if (cidr_addr_parse("::ffff:192.0.2.1", &mapped) != CIDR_OK)
+		return 1;
+	if (cidr_addr_to_v4(&mapped, &out) != CIDR_OK)
+		return 1;
+	if (out.family != CIDR_AF_INET)
+		return 1;
+	if (out.addr.v4[0] != 192 || out.addr.v4[1] != 0 ||
+	    out.addr.v4[2] != 2 || out.addr.v4[3] != 1)
+		return 1;
+
+	/* ::ffff:10.0.0.1 */
+	if (cidr_addr_parse("::ffff:10.0.0.1", &mapped) != CIDR_OK)
+		return 1;
+	if (cidr_addr_to_v4(&mapped, &out) != CIDR_OK)
+		return 1;
+	if (out.addr.v4[0] != 10 || out.addr.v4[1] != 0 ||
+	    out.addr.v4[2] != 0 || out.addr.v4[3] != 1)
+		return 1;
+
+	/* ::ffff:255.255.255.255 -- boundary IPv4 */
+	if (cidr_addr_parse("::ffff:255.255.255.255", &mapped) != CIDR_OK)
+		return 1;
+	if (cidr_addr_to_v4(&mapped, &out) != CIDR_OK)
+		return 1;
+	if (out.addr.v4[0] != 255 || out.addr.v4[1] != 255 ||
+	    out.addr.v4[2] != 255 || out.addr.v4[3] != 255)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_addr_to_v4_error_distinction - verify the three error
+ * conditions are distinguished correctly.
+ *
+ * CIDR_AF_UNSPEC  -> CIDR_ERR_INVAL
+ * CIDR_AF_INET    -> CIDR_ERR_FAMILY  (valid IPv4, wrong family)
+ * CIDR_AF_INET6 non-mapped -> CIDR_ERR_FAMILY
+ *
+ * See TESTING.md §6.7, ARCHITECTURE.md §4.1.3.
+ */
+int test_addr_to_v4_error_distinction(void)
+{
+	cidr_addr_t unspec = {0};
+	cidr_addr_t ipv4, unmapped, out;
+
+	if (cidr_addr_parse("192.168.1.1", &ipv4) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("2001:db8::1", &unmapped) != CIDR_OK)
+		return 1;
+
+	/* CIDR_AF_UNSPEC -> CIDR_ERR_INVAL */
+	if (cidr_addr_to_v4(&unspec, &out) != CIDR_ERR_INVAL)
+		return 1;
+
+	/* CIDR_AF_INET -> CIDR_ERR_FAMILY */
+	if (cidr_addr_to_v4(&ipv4, &out) != CIDR_ERR_FAMILY)
+		return 1;
+
+	/* CIDR_AF_INET6 non-mapped -> CIDR_ERR_FAMILY */
+	if (cidr_addr_to_v4(&unmapped, &out) != CIDR_ERR_FAMILY)
+		return 1;
+
+	/* NULL pointers -> CIDR_ERR_INVAL */
+	if (cidr_addr_to_v4(NULL, &out) != CIDR_ERR_INVAL)
+		return 1;
+	if (cidr_addr_to_v4(&ipv4, NULL) != CIDR_ERR_INVAL)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_addr_cmp_same_family - verify comparison ordering and
+ * equality for addresses within the same family.
+ * See TESTING.md §3, ARCHITECTURE.md §4.4.
+ */
+int test_addr_cmp_same_family(void)
+{
+	cidr_addr_t a, b, c;
+	int result;
+
+	/*
+	 * IPv4: test ordering.
+	 * 10.0.0.1 < 10.0.0.2, 192.168.1.1 > 10.0.0.1
+	 */
+	if (cidr_addr_parse("10.0.0.1", &a) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("10.0.0.2", &b) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("192.168.1.1", &c) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_cmp(&a, &b, &result) != CIDR_OK)
+		return 1;
+	if (result != -1)
+		return 1;
+
+	if (cidr_addr_cmp(&b, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 1)
+		return 1;
+
+	if (cidr_addr_cmp(&c, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 1)
+		return 1;
+
+	/* IPv4: equality returns 0. */
+	if (cidr_addr_cmp(&a, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 0)
+		return 1;
+
+	/*
+	 * IPv6: test ordering.
+	 * 2001:db8::1 < 2001:db8::2, fe80::1 > 2001:db8::1
+	 */
+	if (cidr_addr_parse("2001:db8::1", &a) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("2001:db8::2", &b) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("fe80::1", &c) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_cmp(&a, &b, &result) != CIDR_OK)
+		return 1;
+	if (result != -1)
+		return 1;
+
+	if (cidr_addr_cmp(&b, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 1)
+		return 1;
+
+	if (cidr_addr_cmp(&c, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 1)
+		return 1;
+
+	/* IPv6: equality returns 0. */
+	if (cidr_addr_cmp(&a, &a, &result) != CIDR_OK)
+		return 1;
+	if (result != 0)
+		return 1;
+
+	/* Boundary: :: (all zero) < ::1 */
+	if (cidr_addr_parse("::", &a) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("::1", &b) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_cmp(&a, &b, &result) != CIDR_OK)
+		return 1;
+	if (result != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_addr_cmp_family_mismatch - verify CIDR_ERR_FAMILY when
+ * comparing an IPv4 address with an IPv6 address.
+ * See ARCHITECTURE.md §4.4.
+ */
+int test_addr_cmp_family_mismatch(void)
+{
+	cidr_addr_t ipv4, ipv6;
+	int result;
+
+	if (cidr_addr_parse("10.0.0.1", &ipv4) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("2001:db8::1", &ipv6) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_cmp(&ipv4, &ipv6, &result) != CIDR_ERR_FAMILY)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_addr_cmp_unspec - verify CIDR_ERR_INVAL when one or both
+ * addresses have CIDR_AF_UNSPEC family or pointers are NULL.
+ * See ARCHITECTURE.md §4.4.
+ */
+int test_addr_cmp_unspec(void)
+{
+	cidr_addr_t valid = {0}, unspec = {0};
+	int result;
+
+	if (cidr_addr_parse("10.0.0.1", &valid) != CIDR_OK)
+		return 1;
+	/* unspec is zero-initialised: family == CIDR_AF_UNSPEC */
+
+	/* one UNSPEC -> CIDR_ERR_INVAL */
+	if (cidr_addr_cmp(&unspec, &valid, &result) != CIDR_ERR_INVAL)
+		return 1;
+	if (cidr_addr_cmp(&valid, &unspec, &result) != CIDR_ERR_INVAL)
+		return 1;
+
+	/* both UNSPEC -> CIDR_ERR_INVAL */
+	if (cidr_addr_cmp(&unspec, &unspec, &result) != CIDR_ERR_INVAL)
+		return 1;
+
+	/* NULL pointers -> CIDR_ERR_INVAL */
+	if (cidr_addr_cmp(NULL, &valid, &result) != CIDR_ERR_INVAL)
+		return 1;
+	if (cidr_addr_cmp(&valid, NULL, &result) != CIDR_ERR_INVAL)
+		return 1;
+	if (cidr_addr_cmp(&valid, &valid, NULL) != CIDR_ERR_INVAL)
+		return 1;
+
+	return 0;
+}

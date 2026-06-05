@@ -181,4 +181,59 @@ cidr_err_t cidr_addr_parse(const char *src, cidr_addr_t *out)
 cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_addr_to_v4 - extract embedded IPv4 address from an IPv4-mapped
+ *                   IPv6 address (::ffff:0:0/96).
+ *
+ * The input must be a CIDR_AF_INET6 address whose first 12 bytes match
+ * the IPv4-mapped prefix (00 00 00 00 00 00 00 00 00 00 FF FF).
+ * On success, out is written as a cidr_addr_t with family = CIDR_AF_INET
+ * and the 4 extracted bytes in addr.v4. The input and output are clean,
+ * distinct structs -- no family mixing occurs in any single struct.
+ *
+ * addr: pointer to a cidr_addr_t with family CIDR_AF_INET6
+ * out:  caller-provided cidr_addr_t; on success, written with family
+ *       CIDR_AF_INET and the 4 extracted bytes in addr.v4
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if either pointer is NULL or if
+ *   addr->family is CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if addr->family is CIDR_AF_INET (valid IPv4,
+ *   wrong family for extraction), or if addr->family is CIDR_AF_INET6
+ *   but the first 12 bytes do not match the IPv4-mapped prefix.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.1.3.
+ */
+cidr_err_t cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_addr_cmp - compare two addresses within the same family.
+ *
+ * Compares two cidr_addr_t values lexicographically on the address bytes
+ * in network byte order. Writes -1, 0, or +1 into *result indicating
+ * a < b, a == b, or a > b respectively. This ordering is consistent
+ * with CIDR_SORT_NETWORK_ASC.
+ *
+ * a:      pointer to a valid cidr_addr_t (family must not be
+ *         CIDR_AF_UNSPEC)
+ * b:      pointer to a valid cidr_addr_t (family must not be
+ *         CIDR_AF_UNSPEC)
+ * result: caller-provided int pointer; on success, receives -1, 0, or +1
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if any pointer is NULL or if either address has
+ *   family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if a->family != b->family.
+ *
+ * Complexity: O(W) where W is address width in bytes (4 for IPv4,
+ * 16 for IPv6). No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.4.
+ */
+cidr_err_t cidr_addr_cmp(const cidr_addr_t *a, const cidr_addr_t *b,
+                         int *result) __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

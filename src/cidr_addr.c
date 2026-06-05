@@ -5,6 +5,8 @@
  * See ARCHITECTURE.md §4 for the arithmetic engine specification.
  */
 
+#include <string.h>
+
 #include "../include/libcidr.h"
 #include "cidr_internal.h"
 
@@ -849,4 +851,130 @@ cidr_err_t cidr_addr_format(const cidr_addr_t *addr, char *buf, size_t len)
 	if (addr->family == CIDR_AF_INET)
 		return addr_format_ipv4(addr, buf);
 	return addr_format_ipv6(addr, buf);
+}
+
+/*
+ * cidr_addr_to_v4 - extract embedded IPv4 address from an IPv4-mapped
+ *                   IPv6 address (::ffff:0:0/96).
+ *
+ * The input must be a CIDR_AF_INET6 address whose first 12 bytes match
+ * the IPv4-mapped prefix (00 00 00 00 00 00 00 00 00 00 FF FF).
+ * On success, out is written as a cidr_addr_t with family = CIDR_AF_INET
+ * and the 4 extracted bytes in addr.v4. The input and output are clean,
+ * distinct structs -- no family mixing occurs in any single struct.
+ * The family-discriminator invariant is preserved in both.
+ *
+ * addr: pointer to a cidr_addr_t with family CIDR_AF_INET6
+ * out:  caller-provided cidr_addr_t; on success, written with family
+ *       CIDR_AF_INET and the 4 extracted bytes in addr.v4
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if either pointer is NULL or if
+ *   addr->family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if addr->family == CIDR_AF_INET (valid IPv4,
+ *   wrong family for extraction), or if addr->family == CIDR_AF_INET6
+ *   but the first 12 bytes do not match the IPv4-mapped prefix.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.1.3.
+ */
+cidr_err_t cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
+{
+	int i;
+
+	if (addr == NULL || out == NULL)
+		return CIDR_ERR_INVAL;
+	if (addr->family == CIDR_AF_UNSPEC)
+		return CIDR_ERR_INVAL;
+	if (addr->family != CIDR_AF_INET6)
+		return CIDR_ERR_FAMILY;
+
+	/*
+	 * SAFETY: verify the IPv4-mapped prefix.
+	 * First 10 bytes must be zero, bytes 10-11 must be 0xFF 0xFF.
+	 * This rejects non-mapped IPv6 addresses (e.g. 2001:db8::1)
+	 * and addresses that happen to have family CIDR_AF_INET6
+	 * but are not within ::ffff:0:0/96.
+	 * See ARCHITECTURE.md §4.1.3.
+	 */
+	for (i = 0; i < 10; i++) {
+		if (addr->addr.v6[i] != 0)
+			return CIDR_ERR_FAMILY;
+	}
+	if (addr->addr.v6[10] != 0xFF || addr->addr.v6[11] != 0xFF)
+		return CIDR_ERR_FAMILY;
+
+	/*
+	 * Extract bytes 12-15 as an IPv4 address in network byte order.
+	 * See ARCHITECTURE.md §3.2 for the storage format.
+	 */
+	out->family = CIDR_AF_INET;
+	out->addr.v4[0] = addr->addr.v6[12];
+	out->addr.v4[1] = addr->addr.v6[13];
+	out->addr.v4[2] = addr->addr.v6[14];
+	out->addr.v4[3] = addr->addr.v6[15];
+	return CIDR_OK;
+}
+
+/*
+ * cidr_addr_cmp - compare two addresses within the same family.
+ *
+ * Compares two cidr_addr_t values lexicographically on the address
+ * bytes in network byte order. Writes -1, 0, or +1 into *result
+ * indicating a < b, a == b, or a > b respectively. This ordering
+ * is consistent with CIDR_SORT_NETWORK_ASC.
+ *
+ * Both addresses must be of the same family. Family mismatch returns
+ * CIDR_ERR_FAMILY, not a comparison result. CIDR_AF_UNSPEC on either
+ * input returns CIDR_ERR_INVAL.
+ *
+ * a:      pointer to a valid cidr_addr_t (family must not be
+ *         CIDR_AF_UNSPEC)
+ * b:      pointer to a valid cidr_addr_t (family must not be
+ *         CIDR_AF_UNSPEC)
+ * result: caller-provided int pointer; on success, receives -1, 0,
+ *         or +1
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if any pointer is NULL or if either address
+ *   has family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if a->family != b->family.
+ *
+ * Complexity: O(W) where W is address width in bytes (4 for IPv4,
+ * 16 for IPv6). No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.4.
+ */
+cidr_err_t cidr_addr_cmp(const cidr_addr_t *a, const cidr_addr_t *b,
+                         int *result)
+{
+	int cmp;
+
+	if (a == NULL || b == NULL || result == NULL)
+		return CIDR_ERR_INVAL;
+	if (a->family == CIDR_AF_UNSPEC || b->family == CIDR_AF_UNSPEC)
+		return CIDR_ERR_INVAL;
+	if (a->family != b->family)
+		return CIDR_ERR_FAMILY;
+
+	/*
+	 * SAFETY: family has been validated as CIDR_AF_INET or
+	 * CIDR_AF_INET6. Use the correct union member for memcmp
+	 * dispatch; the byte width is a compile-time constant
+	 * per family (4 for IPv4, 16 for IPv6).
+	 * See ARCHITECTURE.md §4.4.
+	 */
+	if (a->family == CIDR_AF_INET)
+		cmp = memcmp(a->addr.v4, b->addr.v4, 4);
+	else
+		cmp = memcmp(a->addr.v6, b->addr.v6, 16);
+
+	if (cmp < 0)
+		*result = -1;
+	else if (cmp > 0)
+		*result = 1;
+	else
+		*result = 0;
+	return CIDR_OK;
 }
