@@ -44,6 +44,45 @@ extern int test_addr_cmp_same_family(void);
 extern int test_addr_cmp_family_mismatch(void);
 extern int test_addr_cmp_unspec(void);
 
+/*
+ * test_prefix.c -- Phase 3: prefix construction, arithmetic, iteration,
+ *                  and comparison tests.
+ * See DEVELOPMENT.md §Phase 3 Tests for the full test catalogue.
+ */
+extern int test_prefix_parse_valid(void);
+extern int test_prefix_parse_hostbits_rejected(void);
+extern int test_prefix_parse_pfxlen_out_of_range(void);
+extern int test_prefix_parse_null(void);
+extern int test_prefix_from_host_zeroes_hostbits(void);
+extern int test_prefix_from_host_pfxlen_out_of_range(void);
+extern int test_prefix_format_canonical(void);
+extern int test_prefix_format_buffer_too_small(void);
+extern int test_prefix_format_roundtrip(void);
+extern int test_prefix_broadcast_ipv4(void);
+extern int test_prefix_broadcast_ipv6_family_error(void);
+extern int test_prefix_mask_all_lengths(void);
+extern int test_prefix_first_last_edge_cases(void);
+extern int test_prefix_contains_inside(void);
+extern int test_prefix_contains_outside(void);
+extern int test_prefix_contains_null_out(void);
+extern int test_prefix_contains_family_mismatch(void);
+extern int test_prefix_overlaps_disjoint(void);
+extern int test_prefix_overlaps_adjacent(void);
+extern int test_prefix_overlaps_partial(void);
+extern int test_prefix_overlaps_containment(void);
+extern int test_prefix_overlaps_identical(void);
+extern int test_prefix_supernet_chain(void);
+extern int test_prefix_supernet_overflow(void);
+extern int test_subnet_iter_correct_count(void);
+extern int test_subnet_iter_ascending_order(void);
+extern int test_subnet_iter_first_equals_parent_network(void);
+extern int test_subnet_iter_early_termination(void);
+extern int test_subnet_iter_done_out_not_modified(void);
+extern int test_subnet_iter_pfxlen_invalid(void);
+extern int test_prefix_cmp_ordering(void);
+extern int test_prefix_cmp_equal(void);
+extern int test_prefix_cmp_family_mismatch(void);
+
 int tests_run = 0;
 int tests_passed = 0;
 
@@ -98,6 +137,53 @@ main(void)
 	RUN("test_addr_cmp_same_family", test_addr_cmp_same_family);
 	RUN("test_addr_cmp_family_mismatch", test_addr_cmp_family_mismatch);
 	RUN("test_addr_cmp_unspec", test_addr_cmp_unspec);
+
+	RUN("test_prefix_parse_valid", test_prefix_parse_valid);
+	RUN("test_prefix_parse_hostbits_rejected",
+	    test_prefix_parse_hostbits_rejected);
+	RUN("test_prefix_parse_pfxlen_out_of_range",
+	    test_prefix_parse_pfxlen_out_of_range);
+	RUN("test_prefix_parse_null", test_prefix_parse_null);
+	RUN("test_prefix_from_host_zeroes_hostbits",
+	    test_prefix_from_host_zeroes_hostbits);
+	RUN("test_prefix_from_host_pfxlen_out_of_range",
+	    test_prefix_from_host_pfxlen_out_of_range);
+	RUN("test_prefix_format_canonical", test_prefix_format_canonical);
+	RUN("test_prefix_format_buffer_too_small",
+	    test_prefix_format_buffer_too_small);
+	RUN("test_prefix_format_roundtrip", test_prefix_format_roundtrip);
+	RUN("test_prefix_broadcast_ipv4", test_prefix_broadcast_ipv4);
+	RUN("test_prefix_broadcast_ipv6_family_error",
+	    test_prefix_broadcast_ipv6_family_error);
+	RUN("test_prefix_mask_all_lengths", test_prefix_mask_all_lengths);
+	RUN("test_prefix_first_last_edge_cases",
+	    test_prefix_first_last_edge_cases);
+	RUN("test_prefix_contains_inside", test_prefix_contains_inside);
+	RUN("test_prefix_contains_outside", test_prefix_contains_outside);
+	RUN("test_prefix_contains_null_out", test_prefix_contains_null_out);
+	RUN("test_prefix_contains_family_mismatch",
+	    test_prefix_contains_family_mismatch);
+	RUN("test_prefix_overlaps_disjoint", test_prefix_overlaps_disjoint);
+	RUN("test_prefix_overlaps_adjacent", test_prefix_overlaps_adjacent);
+	RUN("test_prefix_overlaps_partial", test_prefix_overlaps_partial);
+	RUN("test_prefix_overlaps_containment",
+	    test_prefix_overlaps_containment);
+	RUN("test_prefix_overlaps_identical", test_prefix_overlaps_identical);
+	RUN("test_prefix_supernet_chain", test_prefix_supernet_chain);
+	RUN("test_prefix_supernet_overflow", test_prefix_supernet_overflow);
+	RUN("test_subnet_iter_correct_count", test_subnet_iter_correct_count);
+	RUN("test_subnet_iter_ascending_order",
+	    test_subnet_iter_ascending_order);
+	RUN("test_subnet_iter_first_equals_parent_network",
+	    test_subnet_iter_first_equals_parent_network);
+	RUN("test_subnet_iter_early_termination",
+	    test_subnet_iter_early_termination);
+	RUN("test_subnet_iter_done_out_not_modified",
+	    test_subnet_iter_done_out_not_modified);
+	RUN("test_subnet_iter_pfxlen_invalid", test_subnet_iter_pfxlen_invalid);
+	RUN("test_prefix_cmp_ordering", test_prefix_cmp_ordering);
+	RUN("test_prefix_cmp_equal", test_prefix_cmp_equal);
+	RUN("test_prefix_cmp_family_mismatch", test_prefix_cmp_family_mismatch);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

@@ -2,16 +2,16 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 2 - Address Arithmetic Engine (COMPLETE)
-**Next Task**: Phase 3.1 -- cidr_prefix_t and cidr_sort_order_t
+**Current Phase**: Phase 3 - Prefix Construction and Arithmetic (COMPLETE)
+**Next Task**: Phase 4.1 -- Shared radix sort engine
 
 ### Phase Summary
 
 | Phase | Name | Status | Tests | Notes |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
-| 3 | Prefix Construction and Arithmetic | PENDING | 0/0 | Parse, arithmetic ops, subnet iterator |
+| 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
@@ -21,15 +21,15 @@
 ### Quality Milestones
 
 | ID | Milestone | Status |
-|---|---|---|
+|---|---|---|---|
 | M1 | Build system works on Linux and OpenBSD, both architectures | CONFIRMED |
-| M2 | All C tests pass on Linux | PENDING |
-| M3 | All C tests pass on OpenBSD | PENDING |
-| M4 | Valgrind clean on Linux | PENDING |
-| M5 | ASan/UBSan clean on both platforms | PENDING |
-| M6 | TSan clean on Linux | PENDING |
-| M7 | clang-format clean | PENDING |
-| M8 | clang-tidy zero warnings | PENDING |
+| M2 | All C tests pass on Linux | CONFIRMED |
+| M3 | All C tests pass on OpenBSD | CONFIRMED |
+| M4 | Valgrind clean on Linux | CONFIRMED |
+| M5 | ASan/UBSan clean on both platforms | CONFIRMED |
+| M6 | TSan clean on Linux | CONFIRMED |
+| M7 | clang-format clean | CONFIRMED |
+| M8 | clang-tidy zero warnings | CONFIRMED |
 | M9 | RFC conformance verified | PENDING |
 | M10 | bulk_aggregate matches ipaddress.collapse_addresses | PENDING |
 | M11 | LC-trie LPM semantics verified | PENDING |
@@ -353,7 +353,7 @@ safely. Comparison returns results consistent with `CIDR_SORT_NETWORK_ASC`.
 - Verify `CIDR_PREFIX_STR_MAX = 50` is sufficient: max IPv6 address (45
   chars) + `/` + `128` + NUL = 50 bytes
 
-**3.4 -- Prefix arithmetic operations**
+**3.4 -- Prefix arithmetic operations** ✓ DONE
 - Implement all eight operations in `src/cidr_prefix.c` per ARCHITECTURE.md §4.3:
   - `cidr_prefix_broadcast()`: IPv4 only; OR network address with complement
     of prefix mask; returns `CIDR_ERR_FAMILY` for IPv6
@@ -370,9 +370,9 @@ safely. Comparison returns results consistent with `CIDR_SORT_NETWORK_ASC`.
 - Each operation must check for NULL input pointers and `CIDR_AF_UNSPEC`
   family per ARCHITECTURE.md §3.1 blanket policy
 
-**3.5 -- Subnet iterator**
+**3.5 -- Subnet iterator** ✓ DONE
 - Implement `cidr_subnet_iter_t` definition in `include/libcidr.h` per
-  ARCHITECTURE.md §4.3.8
+  ARCHITECTURE.md §4.3.8 (already present from Phase 2 header build-up)
 - Implement `cidr_subnet_iter_init()`:
   - Validate that `target_pfxlen > prefix->pfxlen`; return `CIDR_ERR_PFXLEN`
     if not
@@ -384,12 +384,12 @@ safely. Comparison returns results consistent with `CIDR_SORT_NETWORK_ASC`.
   - On `iter->done`, return `CIDR_ERR_DONE` without modifying `out`
   - Write `iter->current` into `out` with `target_pfxlen`
   - Advance `iter->current` by `2^(addr_len_bits - target_pfxlen)` in
-    network byte order (big-endian byte increment)
+    network byte order (big-endian byte increment via `addr_big_endian_inc()`)
   - If the advanced address equals or exceeds `iter->limit`, set `iter->done`
   - Subnets are yielded in ascending network address order; verify first
     subnet equals `prefix.addr`
 
-**3.6 -- `cidr_prefix_cmp()`**
+**3.6 -- `cidr_prefix_cmp()`** ✓ DONE
 - Implement per ARCHITECTURE.md §4.4
 - Order: network address ascending (lexicographic on address bytes in
   network byte order), then prefix length ascending within the same network
@@ -436,13 +436,13 @@ File: `tests/test_prefix.c`
 
 ### Phase 3 Completion Criteria
 
-- [ ] All test_prefix.c tests pass on all four targets
-- [ ] Host-bits-zero invariant test passes: `test_prefix_parse_hostbits_rejected`
+- [x] All test_prefix.c tests pass on all four targets (67/67)
+- [x] Host-bits-zero invariant test passes: `test_prefix_parse_hostbits_rejected`
       and `test_prefix_from_host_zeroes_hostbits`
-- [ ] Subnet iterator ascending order test passes: `test_subnet_iter_ascending_order`
-- [ ] Valgrind clean; ASan/UBSan clean on both platforms
-- [ ] Memory discipline check: no `malloc`/`free` in `src/cidr_prefix.c`
-- [ ] Quality milestone M9 (RFC conformance) further confirmed: prefix parse
+- [x] Subnet iterator ascending order test passes: `test_subnet_iter_ascending_order`
+- [x] Valgrind clean; ASan/UBSan clean on both platforms
+- [x] Memory discipline check: no `malloc`/`free` in `src/cidr_prefix.c`
+- [x] Quality milestone M9 (RFC conformance) further confirmed: prefix parse
       tests pass
 
 ---

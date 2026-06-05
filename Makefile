@@ -73,7 +73,7 @@ LIB_SRCS = src/cidr_addr.c					\
            src/cidr_classify.c				\
            src/cidr_index.c
 
-TEST_SRCS = tests/run_tests.c tests/test_addr.c
+TEST_SRCS = tests/run_tests.c tests/test_addr.c tests/test_prefix.c
 
 # --- Build paths --------------------------------------------------------------
 
@@ -244,6 +244,7 @@ lint:
 	             --suppress=missingIncludeSystem		\
 	             --suppress=unusedFunction			\
 	             --suppress=checkersReport			\
+	             --suppress=staticFunction			\
 	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \
@@ -264,6 +265,7 @@ format:
 	    python/_libcidr_ext.c					\
 	    tests/run_tests.c						\
 	    tests/test_addr.c						\
+	    tests/test_prefix.c						\
 	    tests/test_harness.h
 
 # --- install -------------------------------------------------------------------

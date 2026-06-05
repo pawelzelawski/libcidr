@@ -319,4 +319,250 @@ cidr_err_t cidr_prefix_from_host(const cidr_addr_t *addr, uint8_t pfxlen,
 cidr_err_t cidr_prefix_format(const cidr_prefix_t *prefix, char *buf,
                               size_t len) __attribute__((warn_unused_result));
 
+/*
+ * cidr_prefix_broadcast - compute the broadcast address of an IPv4 prefix.
+ *
+ * IPv4 only. Returns CIDR_ERR_FAMILY for CIDR_AF_INET6 prefixes -- IPv6
+ * has no broadcast address per RFC 4291. Computed by ORing the network
+ * address with the bitwise complement of the prefix mask.
+ *
+ * prefix: pointer to a valid cidr_prefix_t (addr.family must be
+ *         CIDR_AF_INET)
+ * out:    caller-provided cidr_addr_t; on success receives the broadcast
+ *         address with family CIDR_AF_INET
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or out is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if prefix->addr.family is CIDR_AF_INET6.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.2.
+ */
+cidr_err_t cidr_prefix_broadcast(const cidr_prefix_t *prefix, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_mask - compute the prefix mask (network mask).
+ *
+ * Returns a cidr_addr_t with pfxlen leading bits set to one and remaining
+ * bits set to zero, in network byte order. For pfxlen 0: all bytes zero.
+ * For maximum prefix length (32 for IPv4, 128 for IPv6): all bytes 0xFF.
+ *
+ * prefix: pointer to a valid cidr_prefix_t
+ * out:    caller-provided cidr_addr_t; on success receives the prefix mask
+ *         with family matching prefix->addr.family
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or out is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.3.
+ */
+cidr_err_t cidr_prefix_mask(const cidr_prefix_t *prefix, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_first - return the network (first) address of a prefix.
+ *
+ * The network address is prefix->addr directly -- host bits are guaranteed
+ * zero by construction. This function copies the address to out.
+ *
+ * prefix: pointer to a valid cidr_prefix_t
+ * out:    caller-provided cidr_addr_t; on success receives the network
+ *         address with family matching prefix->addr.family
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or out is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.4.
+ */
+cidr_err_t cidr_prefix_first(const cidr_prefix_t *prefix, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_last - return the last address of a prefix.
+ *
+ * For IPv4: the broadcast address (network address ORed with complement
+ * of prefix mask). For IPv6: the host-bits-all-ones address (same
+ * computation). For /32 (IPv4) or /128 (IPv6), the first and last
+ * addresses are identical.
+ *
+ * prefix: pointer to a valid cidr_prefix_t
+ * out:    caller-provided cidr_addr_t; on success receives the last
+ *         address with family matching prefix->addr.family
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or out is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.4.
+ */
+cidr_err_t cidr_prefix_last(const cidr_prefix_t *prefix, cidr_addr_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_contains - test whether a prefix contains an address.
+ *
+ * Writes true into *out if addr falls within prefix, false otherwise.
+ * Computed as (addr & mask) == prefix->addr. out may be NULL -- when
+ * NULL, the computation is performed and the status code is returned
+ * without writing the result.
+ *
+ * prefix: pointer to a valid cidr_prefix_t
+ * addr:   pointer to a valid cidr_addr_t
+ * out:    optional result pointer (may be NULL); on success receives
+ *         true or false
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or addr is NULL, or if either has
+ *   family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if prefix->addr.family != addr->family.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.5.
+ */
+cidr_err_t cidr_prefix_contains(const cidr_prefix_t *prefix,
+                                const cidr_addr_t *addr, bool *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_overlaps - test whether two prefixes share any address.
+ *
+ * Two prefixes overlap if and only if one contains the network address
+ * of the other: cidr_prefix_contains(a, b->addr) ||
+ * cidr_prefix_contains(b, a->addr). out may be NULL.
+ *
+ * a, b: pointers to valid cidr_prefix_t values (same family)
+ * out:  optional result pointer (may be NULL); on success receives
+ *       true or false
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if a or b is NULL, or if either has
+ *   family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if a->addr.family != b->addr.family.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.6.
+ */
+cidr_err_t cidr_prefix_overlaps(const cidr_prefix_t *a, const cidr_prefix_t *b,
+                                bool *out) __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_supernet - compute the parent prefix at pfxlen - 1.
+ *
+ * The supernet of 192.168.1.0/24 is 192.168.0.0/23. Computed by
+ * decrementing pfxlen by one and zeroing the new host bit in the
+ * network address.
+ *
+ * prefix: pointer to a valid cidr_prefix_t (pfxlen must be > 0)
+ * out:    caller-provided cidr_prefix_t; on success receives the
+ *         supernet with family matching prefix->addr.family
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefix or out is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_OVERFLOW if prefix->pfxlen is 0 (the entire
+ *   address space has no parent).
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.7.
+ */
+cidr_err_t cidr_prefix_supernet(const cidr_prefix_t *prefix, cidr_prefix_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_subnet_iter_init - initialise a subnet iterator.
+ *
+ * Prepares the iterator to enumerate all subnets of prefix at the given
+ * target prefix length. target_pfxlen must be strictly greater than
+ * prefix->pfxlen and within the valid range for the address family.
+ * Iterator state lives on the caller's stack -- no allocation.
+ *
+ * iter:         caller-provided cidr_subnet_iter_t; initialised on success
+ * prefix:       pointer to a valid cidr_prefix_t
+ * target_pfxlen: prefix length of the subnets to enumerate
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if iter or prefix is NULL, or if
+ *   prefix->addr.family is CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_PFXLEN if target_pfxlen <= prefix->pfxlen or
+ *   target_pfxlen exceeds the maximum for the address family.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.8.
+ */
+cidr_err_t cidr_subnet_iter_init(cidr_subnet_iter_t *iter,
+                                 const cidr_prefix_t *prefix,
+                                 uint8_t target_pfxlen)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_subnet_iter_next - yield the next subnet from a subnet iterator.
+ *
+ * Writes the next subnet into out and advances the iterator. Subnets
+ * are yielded in ascending network address order. The first subnet
+ * yielded has the same network address as the parent prefix.
+ *
+ * iter: pointer to an initialised cidr_subnet_iter_t
+ * out:  caller-provided cidr_prefix_t; on success receives the next
+ *       subnet's address and target_pfxlen
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_DONE when all subnets have been yielded -- out is
+ *   NOT modified on this return. This is the normal termination
+ *   condition, not an error.
+ *
+ * The caller's loop pattern:
+ *   cidr_subnet_iter_init(&iter, &prefix, target_pfxlen);
+ *   while ((err = cidr_subnet_iter_next(&iter, &subnet)) == CIDR_OK) {
+ *       // process subnet
+ *   }
+ *   if (err != CIDR_ERR_DONE) {
+ *       // handle unexpected error
+ *   }
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.3.8.
+ */
+cidr_err_t cidr_subnet_iter_next(cidr_subnet_iter_t *iter, cidr_prefix_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_cmp - compare two prefixes within the same family.
+ *
+ * Compares two cidr_prefix_t values. Ordering matches
+ * CIDR_SORT_NETWORK_ASC: network address ascending (lexicographic on
+ * address bytes in network byte order), then prefix length ascending
+ * within the same network address. Writes -1, 0, or +1 into *result.
+ *
+ * a, b:   pointers to valid cidr_prefix_t values (same family)
+ * result: caller-provided int pointer; on success receives -1, 0, or +1
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if a, b, or result is NULL, or if either
+ *   prefix has addr.family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if a->addr.family != b->addr.family.
+ *
+ * Complexity: O(W) where W is address width in bytes (4 for IPv4,
+ * 16 for IPv6). No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.4.
+ */
+cidr_err_t cidr_prefix_cmp(const cidr_prefix_t *a, const cidr_prefix_t *b,
+                           int *result) __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */
