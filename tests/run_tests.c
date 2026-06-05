@@ -83,6 +83,21 @@ extern int test_prefix_cmp_ordering(void);
 extern int test_prefix_cmp_equal(void);
 extern int test_prefix_cmp_family_mismatch(void);
 
+/*
+ * test_bulk.c -- Phase 4: bulk engine sort tests.
+ * See DEVELOPMENT.md §Phase 4 Tests for the test catalogue.
+ */
+extern int test_bulk_sort_empty(void);
+extern int test_bulk_sort_single(void);
+extern int test_bulk_sort_invalid_order(void);
+extern int test_bulk_sort_network_asc_order(void);
+extern int test_bulk_sort_network_asc_ipv6(void);
+extern int test_bulk_sort_pfxlen_desc_order(void);
+extern int test_bulk_sort_pfxlen_desc_stability(void);
+extern int test_bulk_sort_null_prefixes(void);
+extern int test_bulk_sort_family_mismatch(void);
+extern int test_bulk_sort_unspec_family(void);
+
 int tests_run = 0;
 int tests_passed = 0;
 
@@ -184,6 +199,20 @@ main(void)
 	RUN("test_prefix_cmp_ordering", test_prefix_cmp_ordering);
 	RUN("test_prefix_cmp_equal", test_prefix_cmp_equal);
 	RUN("test_prefix_cmp_family_mismatch", test_prefix_cmp_family_mismatch);
+
+	RUN("test_bulk_sort_empty", test_bulk_sort_empty);
+	RUN("test_bulk_sort_single", test_bulk_sort_single);
+	RUN("test_bulk_sort_invalid_order", test_bulk_sort_invalid_order);
+	RUN("test_bulk_sort_network_asc_order",
+	    test_bulk_sort_network_asc_order);
+	RUN("test_bulk_sort_network_asc_ipv6", test_bulk_sort_network_asc_ipv6);
+	RUN("test_bulk_sort_pfxlen_desc_order",
+	    test_bulk_sort_pfxlen_desc_order);
+	RUN("test_bulk_sort_pfxlen_desc_stability",
+	    test_bulk_sort_pfxlen_desc_stability);
+	RUN("test_bulk_sort_null_prefixes", test_bulk_sort_null_prefixes);
+	RUN("test_bulk_sort_family_mismatch", test_bulk_sort_family_mismatch);
+	RUN("test_bulk_sort_unspec_family", test_bulk_sort_unspec_family);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

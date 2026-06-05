@@ -565,4 +565,44 @@ cidr_err_t cidr_subnet_iter_next(cidr_subnet_iter_t *iter, cidr_prefix_t *out)
 cidr_err_t cidr_prefix_cmp(const cidr_prefix_t *a, const cidr_prefix_t *b,
                            int *result) __attribute__((warn_unused_result));
 
+/*
+ * cidr_bulk_sort - sort a prefix array in place using MSD radix sort.
+ *
+ * Sorts the caller-provided prefix array in place using the shared in-place
+ * MSD radix sort engine. Two orderings are supported:
+ *
+ * CIDR_SORT_NETWORK_ASC (0) -- network address ascending (lexicographic on
+ *   address bytes in network byte order), prefix length ascending within
+ *   the same network address. Used by cidr_bulk_aggregate().
+ *
+ * CIDR_SORT_PFXLEN_DESC (1) -- prefix length descending (longest prefix
+ *   first), network address ascending within equal prefix lengths. Used to
+ *   prepare a prefix table for longest-prefix-match with
+ *   cidr_bulk_contains(). Stable: exact duplicate prefixes preserve their
+ *   original input order.
+ *
+ * prefixes: caller-provided prefix array; modified in place
+ * count:    number of entries in prefixes
+ * order:    CIDR_SORT_NETWORK_ASC or CIDR_SORT_PFXLEN_DESC
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if order is not a valid cidr_sort_order_t value,
+ *   if count > 0 and prefixes is NULL, or if any prefix has
+ *   addr.family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the array contains mixed IPv4 and IPv6 prefixes.
+ *
+ * When count == 0, prefixes may be NULL; returns CIDR_OK with no work
+ * performed. See ARCHITECTURE.md §3.4 for the empty array policy.
+ *
+ * Complexity: O(n * k) where k is key width in bytes (5 for IPv4, 17 for
+ * IPv6); treated as O(n) because k is a compile-time constant.
+ * No allocation occurs. Stack usage: bounded per ARCHITECTURE.md §5.4.
+ *
+ * See ARCHITECTURE.md §5.5 for the sort specification, §5.4 for the radix
+ * sort algorithm and stack bound.
+ */
+cidr_err_t cidr_bulk_sort(cidr_prefix_t *prefixes, size_t count,
+                          cidr_sort_order_t order)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

@@ -73,7 +73,8 @@ LIB_SRCS = src/cidr_addr.c					\
            src/cidr_classify.c				\
            src/cidr_index.c
 
-TEST_SRCS = tests/run_tests.c tests/test_addr.c tests/test_prefix.c
+TEST_SRCS = tests/run_tests.c tests/test_addr.c tests/test_prefix.c \
+            tests/test_bulk.c
 
 # --- Build paths --------------------------------------------------------------
 
@@ -267,6 +268,7 @@ format:
 	    tests/run_tests.c						\
 	    tests/test_addr.c						\
 	    tests/test_prefix.c						\
+	    tests/test_bulk.c						\
 	    tests/test_harness.h
 
 # --- install -------------------------------------------------------------------

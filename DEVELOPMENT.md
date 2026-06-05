@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 3 - Prefix Construction and Arithmetic (COMPLETE)
-**Next Task**: Phase 4.1 -- Shared radix sort engine
+**Current Phase**: Phase 4 -- Bulk Engine (IN PROGRESS)
+**Next Task**: Phase 4.2 -- cidr_bulk_parse()
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
-| 4 | Bulk Engine | PENDING | 0/0 | Batch parse, containment, aggregation, sort |
+| 4 | Bulk Engine | IN PROGRESS | 10/10 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
@@ -472,7 +472,7 @@ cases at count boundaries are handled.
 
 ### Tasks
 
-**4.1 -- Shared radix sort engine**
+**4.1 -- Shared radix sort engine** ✓ DONE
 - Implement in-place MSD radix sort in `src/cidr_bulk.c` as an internal
   function
 - Key width: 5 bytes for IPv4 (4 address bytes + 1 pfxlen byte), 17 bytes

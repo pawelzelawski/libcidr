@@ -19,4 +19,25 @@ _Static_assert(
 _Static_assert(
     1 == 1, "placeholder -- replaced in Phase 6 with cidr_lctrie_node_t == 12");
 
+/*
+ * radix_sort_prefixes - in-place MSD radix sort for prefix arrays.
+ *
+ * Sorts the prefix array in place using the shared in-place MSD radix sort
+ * engine. Used internally by cidr_bulk_sort() and cidr_index_create().
+ * No allocation occurs -- all workspace is on the stack.
+ *
+ * prefixes: caller-provided prefix array; modified in place
+ * count:    number of entries in prefixes (must be > 0)
+ * order:    CIDR_SORT_NETWORK_ASC or CIDR_SORT_PFXLEN_DESC
+ *
+ * The caller must ensure that all prefixes have the same valid address
+ * family (CIDR_AF_INET or CIDR_AF_INET6) and that count > 0. No parameter
+ * validation is performed by this function -- callers are responsible for
+ * checking preconditions.
+ *
+ * See ARCHITECTURE.md §5.4, §5.5.
+ */
+void radix_sort_prefixes(cidr_prefix_t *prefixes, size_t count,
+                         cidr_sort_order_t order);
+
 #endif /* CIDR_INTERNAL_H */
