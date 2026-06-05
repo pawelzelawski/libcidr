@@ -323,14 +323,16 @@ safely. Comparison returns results consistent with `CIDR_SORT_NETWORK_ASC`.
 
 ### Tasks
 
-**3.1 -- `cidr_prefix_t` and `cidr_sort_order_t`**
+**3.1 -- `cidr_prefix_t` and `cidr_sort_order_t`** ✓ DONE
 - Define `cidr_prefix_t` in `include/libcidr.h` per ARCHITECTURE.md §3.3
 - Add `_Static_assert(sizeof(cidr_prefix_t) == 24, ...)` to
   `src/cidr_internal.h`
 - Define `cidr_sort_order_t` enum in `include/libcidr.h`
 - Define `CIDR_PREFIX_STR_MAX = 50` in `include/libcidr.h`
+- All four items were already present in the codebase from Phase 2 header
+  build-up. Verified against specification and validation gate.
 
-**3.2 -- `cidr_prefix_parse()` and `cidr_prefix_from_host()`**
+**3.2 -- `cidr_prefix_parse()` and `cidr_prefix_from_host()`** ✓ DONE
 - Implement `cidr_prefix_parse()` in `src/cidr_prefix.c`:
   - Parse `address/prefixlen` by splitting at the last `/`
   - Delegate address parsing to `cidr_addr_parse()` from Phase 2

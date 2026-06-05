@@ -238,4 +238,59 @@ cidr_err_t cidr_addr_to_v4(const cidr_addr_t *addr, cidr_addr_t *out)
 cidr_err_t cidr_addr_cmp(const cidr_addr_t *a, const cidr_addr_t *b,
                          int *result) __attribute__((warn_unused_result));
 
+/*
+ * cidr_prefix_parse - parse a CIDR prefix from text (strict).
+ *
+ * Input must be "address/prefixlen" where address is a valid IPv4 or
+ * IPv6 address per ARCHITECTURE.md §4.1.1 or §4.1.2 and prefixlen is a
+ * decimal integer in the valid range for the address family. Returns
+ * CIDR_ERR_HOSTBITS if the address has any host bits set. On failure,
+ * out->addr.family is written as CIDR_AF_UNSPEC.
+ *
+ * src:  null-terminated CIDR string ("address/prefixlen")
+ * out:  caller-provided cidr_prefix_t; on success addr.family is
+ *       CIDR_AF_INET or CIDR_AF_INET6
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if src or out is NULL.
+ * Returns CIDR_ERR_PARSE if the address portion does not parse.
+ * Returns CIDR_ERR_PFXLEN if prefix length is out of range for the
+ *   address family.
+ * Returns CIDR_ERR_HOSTBITS if the address has host bits set.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.1.4.
+ */
+cidr_err_t cidr_prefix_parse(const char *src, cidr_prefix_t *out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_prefix_from_host - construct a prefix from a host address
+ *                         (explicit host-to-network).
+ *
+ * Accepts a host address and a prefix length. Computes the network
+ * address by zeroing host bits. The zeroing is explicit -- the function
+ * name documents the operation. Must not return CIDR_ERR_HOSTBITS.
+ *
+ * addr:   pointer to a valid cidr_addr_t (family must be CIDR_AF_INET
+ *         or CIDR_AF_INET6)
+ * pfxlen: prefix length; validated against the address family range
+ * out:    caller-provided cidr_prefix_t; on success addr.family matches
+ *         addr->family and host bits are zeroed
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addr or out is NULL, or if addr->family is
+ *   CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_PFXLEN if pfxlen is out of range for the address
+ *   family.
+ *
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §4.1.4.
+ */
+cidr_err_t cidr_prefix_from_host(const cidr_addr_t *addr, uint8_t pfxlen,
+                                 cidr_prefix_t *out)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */
