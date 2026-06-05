@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 4 -- Bulk Engine (IN PROGRESS)
-**Next Task**: Phase 4.2 -- cidr_bulk_parse()
+**Next Task**: Phase 4.3 -- cidr_bulk_contains()
 
 ### Phase Summary
 
@@ -12,7 +12,7 @@
 | 1 | Foundation | COMPLETE | 0/0 | Build system, test harness, Python skeleton |
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
-| 4 | Bulk Engine | IN PROGRESS | 10/10 | Batch parse, containment, aggregation, sort |
+| 4 | Bulk Engine | IN PROGRESS | 18/18 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
@@ -493,7 +493,7 @@ cases at count boundaries are handled.
   the original array index as a tiebreaker key or by using a stable sort
   variant
 
-**4.2 -- `cidr_bulk_parse()`**
+**4.2 -- `cidr_bulk_parse()`** ✓ DONE
 - Implement per ARCHITECTURE.md §5.2
 - Check for NULL elements in `srcs` first: if any `srcs[i]` is NULL, return
   `CIDR_ERR_INVAL` immediately with no output written

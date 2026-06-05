@@ -4,6 +4,9 @@
  * Implements cidr_bulk_parse(), cidr_bulk_contains(),
  * cidr_bulk_aggregate(), and cidr_bulk_sort(). Contains the shared
  * in-place MSD radix sort engine.
+ *
+ * cidr_bulk_parse() is implemented in this phase. See ARCHITECTURE.md §5.2
+ * for the batch parse specification and return-code precedence.
  * See ARCHITECTURE.md §5 for the bulk engine specification.
  */
 
@@ -227,5 +230,114 @@ cidr_bulk_sort(cidr_prefix_t *prefixes, size_t count, cidr_sort_order_t order)
 	}
 
 	radix_sort_prefixes(prefixes, count, order);
+	return CIDR_OK;
+}
+
+/*
+ * cidr_bulk_parse - batch-parse address strings into a caller-provided array.
+ *
+ * Parses count address strings from srcs into out. Each string is parsed
+ * per cidr_addr_parse() semantics (ARCHITECTURE.md §4.1). On parse failure
+ * for item i, out[i].family is set to CIDR_AF_UNSPEC and errs[i] is set to
+ * CIDR_ERR_PARSE. On success, errs[i] is CIDR_OK.
+ *
+ * All items are attempted regardless of individual parse failures. The
+ * reference family is inferred from the first successfully-parsed item.
+ * After the full batch, return-code precedence applies:
+ * CIDR_ERR_FAMILY > CIDR_ERR_PARSE > CIDR_OK.
+ *
+ * srcs:  array of count null-terminated address strings
+ * count: number of entries in srcs and out
+ * out:   caller-provided cidr_addr_t array; written on success with the
+ *        parsed address, or with family = CIDR_AF_UNSPEC on parse failure
+ * errs:  optional per-item error array (may be NULL); when non-NULL, must
+ *        have space for count cidr_err_t values
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if srcs or out is NULL, or if any srcs[i] is
+ *   NULL (fail-fast, no output written on NULL element).
+ * Returns CIDR_ERR_PARSE if any item failed to parse.
+ * Returns CIDR_ERR_FAMILY if successfully-parsed items have mixed families.
+ *
+ * When count == 0, returns CIDR_OK with no work performed and all pointer
+ * parameters are ignored per ARCHITECTURE.md §3.4 empty array policy.
+ *
+ * Complexity: O(n) where n is count.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.2 for the full batch parse specification.
+ */
+cidr_err_t
+cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
+                cidr_err_t *errs)
+{
+	cidr_family_t ref_family;
+	bool has_parse_failure;
+	bool has_family_mismatch;
+	bool ref_family_set;
+	size_t i;
+
+	/* Empty array policy. See ARCHITECTURE.md §3.4. */
+	if (count == 0)
+		return CIDR_OK;
+
+	/* Validate mandatory pointer parameters. */
+	if (srcs == NULL || out == NULL)
+		return CIDR_ERR_INVAL;
+
+	/*
+	 * SAFETY: NULL element in srcs triggers fail-fast with no output
+	 * written. All string pointers in srcs must be non-NULL before any
+	 * parsing occurs. See ARCHITECTURE.md §5.2 NULL element policy.
+	 */
+	for (i = 0; i < count; i++) {
+		if (srcs[i] == NULL)
+			return CIDR_ERR_INVAL;
+	}
+
+	/*
+	 * Process all items regardless of individual parse failures.
+	 * No fail-fast after the NULL element check.
+	 * See ARCHITECTURE.md §5.2.
+	 */
+	ref_family_set = false;
+	has_parse_failure = false;
+	has_family_mismatch = false;
+
+	for (i = 0; i < count; i++) {
+		cidr_err_t rc = cidr_addr_parse(srcs[i], &out[i]);
+
+		if (rc == CIDR_OK) {
+			if (!ref_family_set) {
+				ref_family = out[i].family;
+				ref_family_set = true;
+			} else if (out[i].family != ref_family) {
+				has_family_mismatch = true;
+			}
+
+			if (errs != NULL)
+				errs[i] = CIDR_OK;
+		} else {
+			/*
+			 * Parse failure: write error sentinel to output.
+			 * See ARCHITECTURE.md §5.2.
+			 */
+			out[i].family = CIDR_AF_UNSPEC;
+			has_parse_failure = true;
+
+			if (errs != NULL)
+				errs[i] = CIDR_ERR_PARSE;
+		}
+	}
+
+	/*
+	 * Return-code precedence:
+	 * CIDR_ERR_FAMILY > CIDR_ERR_PARSE > CIDR_OK.
+	 * See ARCHITECTURE.md §5.2.
+	 */
+	if (has_family_mismatch)
+		return CIDR_ERR_FAMILY;
+	if (has_parse_failure)
+		return CIDR_ERR_PARSE;
 	return CIDR_OK;
 }

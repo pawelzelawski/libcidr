@@ -84,9 +84,17 @@ extern int test_prefix_cmp_equal(void);
 extern int test_prefix_cmp_family_mismatch(void);
 
 /*
- * test_bulk.c -- Phase 4: bulk engine sort tests.
+ * test_bulk.c -- Phase 4: bulk engine tests.
  * See DEVELOPMENT.md §Phase 4 Tests for the test catalogue.
  */
+extern int test_bulk_parse_empty(void);
+extern int test_bulk_parse_single(void);
+extern int test_bulk_parse_all_valid(void);
+extern int test_bulk_parse_partial_failure(void);
+extern int test_bulk_parse_null_errs(void);
+extern int test_bulk_parse_null_element(void);
+extern int test_bulk_parse_return_code_precedence(void);
+extern int test_bulk_parse_full_batch_all_attempted(void);
 extern int test_bulk_sort_empty(void);
 extern int test_bulk_sort_single(void);
 extern int test_bulk_sort_invalid_order(void);
@@ -200,6 +208,16 @@ main(void)
 	RUN("test_prefix_cmp_equal", test_prefix_cmp_equal);
 	RUN("test_prefix_cmp_family_mismatch", test_prefix_cmp_family_mismatch);
 
+	RUN("test_bulk_parse_empty", test_bulk_parse_empty);
+	RUN("test_bulk_parse_single", test_bulk_parse_single);
+	RUN("test_bulk_parse_all_valid", test_bulk_parse_all_valid);
+	RUN("test_bulk_parse_partial_failure", test_bulk_parse_partial_failure);
+	RUN("test_bulk_parse_null_errs", test_bulk_parse_null_errs);
+	RUN("test_bulk_parse_null_element", test_bulk_parse_null_element);
+	RUN("test_bulk_parse_return_code_precedence",
+	    test_bulk_parse_return_code_precedence);
+	RUN("test_bulk_parse_full_batch_all_attempted",
+	    test_bulk_parse_full_batch_all_attempted);
 	RUN("test_bulk_sort_empty", test_bulk_sort_empty);
 	RUN("test_bulk_sort_single", test_bulk_sort_single);
 	RUN("test_bulk_sort_invalid_order", test_bulk_sort_invalid_order);

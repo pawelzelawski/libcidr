@@ -605,4 +605,46 @@ cidr_err_t cidr_bulk_sort(cidr_prefix_t *prefixes, size_t count,
                           cidr_sort_order_t order)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_bulk_parse - batch-parse address strings.
+ *
+ * Parses count address strings from the srcs array into the out array.
+ * Each string is parsed per cidr_addr_parse() semantics (ARCHITECTURE.md
+ * §4.1). The errs array receives per-item error codes (CIDR_OK on success,
+ * CIDR_ERR_PARSE on failure). errs may be NULL to suppress per-item errors.
+ *
+ * All items are attempted regardless of individual parse failures. The
+ * expected address family is inferred from the first successfully-parsed
+ * item. After the full batch, return-code precedence applies:
+ *
+ *   CIDR_ERR_FAMILY > CIDR_ERR_PARSE > CIDR_OK
+ *
+ * A NULL element in srcs causes immediate fail-fast: CIDR_ERR_INVAL is
+ * returned and no output is written.
+ *
+ * srcs:  array of count null-terminated address strings
+ * count: number of entries in srcs, out, and errs
+ * out:   caller-provided cidr_addr_t array; on success receives parsed
+ *        addresses; on parse failure out[i].family is CIDR_AF_UNSPEC
+ * errs:  optional per-item error array (may be NULL); when non-NULL, must
+ *        have space for count cidr_err_t values
+ *
+ * Returns CIDR_OK on success (all items parsed to the same family).
+ * Returns CIDR_ERR_INVAL if srcs or out is NULL, or if any srcs[i] is
+ *   NULL (fail-fast).
+ * Returns CIDR_ERR_PARSE if any item failed to parse.
+ * Returns CIDR_ERR_FAMILY if successfully-parsed items have mixed families.
+ *
+ * When count == 0, returns CIDR_OK with no work performed per the empty
+ * array policy (ARCHITECTURE.md §3.4).
+ *
+ * Complexity: O(n) where n = count.
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §5.2 for the batch parse specification.
+ */
+cidr_err_t cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
+                           cidr_err_t *errs)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */
