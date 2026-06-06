@@ -280,6 +280,7 @@ format:
 	    tests/test_addr.c						\
 	    tests/test_prefix.c						\
 	    tests/test_bulk.c						\
+	    tests/test_classify.c					\
 	    tests/test_harness.h
 
 # --- install -------------------------------------------------------------------
