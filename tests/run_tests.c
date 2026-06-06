@@ -157,6 +157,15 @@ extern int test_index_create_count_overflow(void);
 extern int test_index_destroy_null_safe(void);
 extern int test_index_lookup_null_matches_nonzero_count(void);
 extern int test_index_lookup_count_zero(void);
+extern int test_index_basic_lookup(void);
+extern int test_index_basic_lookup_ipv6(void);
+extern int test_index_interior_node_prefix(void);
+extern int test_index_interior_node_ipv6(void);
+extern int test_index_duplicate_lower_index_wins(void);
+extern int test_index_no_match(void);
+extern int test_index_memory_clean(void);
+extern int test_index_lpm_matches_sorted_bulk(void);
+extern int test_index_lookup_family_mismatch(void);
 
 int tests_run = 0;
 int tests_passed = 0;
@@ -350,6 +359,18 @@ main(void)
 	RUN("test_index_lookup_null_matches_nonzero_count",
 	    test_index_lookup_null_matches_nonzero_count);
 	RUN("test_index_lookup_count_zero", test_index_lookup_count_zero);
+	RUN("test_index_basic_lookup", test_index_basic_lookup);
+	RUN("test_index_basic_lookup_ipv6", test_index_basic_lookup_ipv6);
+	RUN("test_index_interior_node_prefix", test_index_interior_node_prefix);
+	RUN("test_index_interior_node_ipv6", test_index_interior_node_ipv6);
+	RUN("test_index_duplicate_lower_index_wins",
+	    test_index_duplicate_lower_index_wins);
+	RUN("test_index_no_match", test_index_no_match);
+	RUN("test_index_memory_clean", test_index_memory_clean);
+	RUN("test_index_lpm_matches_sorted_bulk",
+	    test_index_lpm_matches_sorted_bulk);
+	RUN("test_index_lookup_family_mismatch",
+	    test_index_lookup_family_mismatch);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

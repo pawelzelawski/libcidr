@@ -54,8 +54,10 @@ _Static_assert(
  * node_count:    number of nodes in nodes
  * prefixes:      copy of the caller-provided prefix array (heap-allocated,
  *                owned); caller may free their array after index_create
- *                returns
+ *                returns. Sorted by CIDR_SORT_NETWORK_ASC.
  * prefix_count:  number of prefixes
+ * orig_indices:  mapping sorted_position -> original caller index
+ *                (heap-allocated, owned); length == prefix_count
  * family:        CIDR_AF_INET or CIDR_AF_INET6 -- all prefixes share one
  *                family; mixed-family indices are not allowed
  */
@@ -64,6 +66,7 @@ struct cidr_index {
 	uint32_t node_count;
 	cidr_prefix_t *prefixes;
 	size_t prefix_count;
+	uint32_t *orig_indices;
 	cidr_family_t family;
 };
 
