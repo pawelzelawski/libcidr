@@ -22,6 +22,7 @@
 #include <Python.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../include/libcidr.h"
@@ -130,6 +131,9 @@ typedef struct {
 /* Static type references (initialised in PyInit_libcidr). */
 static PyTypeObject *ipv4address_type = NULL;
 static PyTypeObject *ipv6address_type = NULL;
+static PyTypeObject *ipv4network_type = NULL;
+static PyTypeObject *ipv6network_type = NULL;
+static PyTypeObject *subnetiterator_type = NULL;
 
 /* -------------------------------------------------------------------
  * Helpers.
@@ -1091,6 +1095,1340 @@ static PyType_Spec ipv6address_spec = {"libcidr.IPv6Address",
                                        sizeof(IPv6Address), 0,
                                        Py_TPFLAGS_DEFAULT, ipv6address_slots};
 
+/* ===================================================================
+ * IPv4Network and IPv6Network types.
+ * See ARCHITECTURE.md §8.7, CODING_STANDARDS.md §6.
+ * =================================================================== */
+
+/* -------------------------------------------------------------------
+ * Struct definitions.
+ * cidr_prefix_t embedded by value in the PyObject allocation.
+ * No heap-allocated members to free separately.
+ * See ARCHITECTURE.md §8.10.
+ * ------------------------------------------------------------------- */
+
+typedef struct {
+	PyObject_HEAD cidr_prefix_t prefix;
+} IPv4Network;
+
+typedef struct {
+	PyObject_HEAD cidr_prefix_t prefix;
+} IPv6Network;
+
+/*
+ * SubnetIterator struct.
+ * cidr_subnet_iter_t embedded by value. Family saved for constructing
+ * the correct network type (IPv4Network vs IPv6Network) on each yield.
+ * See ARCHITECTURE.md §8.9.
+ */
+typedef struct {
+	PyObject_HEAD cidr_subnet_iter_t iter;
+	cidr_family_t family;
+} SubnetIterator;
+
+/* -------------------------------------------------------------------
+ * Helpers shared by address types and network types.
+ * ------------------------------------------------------------------- */
+
+/*
+ * binding_addr_to_pyobj - create an IPv4Address or IPv6Address from a
+ *                         cidr_addr_t.
+ *
+ * Allocates a new Python address object of the correct family and copies
+ * the C struct into it. Caller owns the returned reference.
+ *
+ * Returns NULL on allocation failure (MemoryError set).
+ */
+static PyObject *
+binding_addr_to_pyobj(const cidr_addr_t *addr)
+{
+	PyTypeObject *tp;
+	PyObject *self;
+
+	tp = (addr->family == CIDR_AF_INET) ? ipv4address_type
+	                                    : ipv6address_type;
+	self = PyType_GenericNew(tp, NULL, NULL);
+	if (self == NULL)
+		return NULL;
+	if (addr->family == CIDR_AF_INET)
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&((IPv4Address *)self)->addr, addr, sizeof(cidr_addr_t));
+	else
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&((IPv6Address *)self)->addr, addr, sizeof(cidr_addr_t));
+	return self;
+}
+
+/*
+ * binding_prefix_to_pyobj - create an IPv4Network or IPv6Network from a
+ *                           cidr_prefix_t.
+ *
+ * Allocates a new Python network object of the correct family and copies
+ * the C struct into it. Caller owns the returned reference.
+ *
+ * Returns NULL on allocation failure (MemoryError set).
+ */
+static PyObject *
+binding_prefix_to_pyobj(const cidr_prefix_t *prefix)
+{
+	PyTypeObject *tp;
+	PyObject *self;
+
+	tp = (prefix->addr.family == CIDR_AF_INET) ? ipv4network_type
+	                                           : ipv6network_type;
+	self = PyType_GenericNew(tp, NULL, NULL);
+	if (self == NULL)
+		return NULL;
+	if (prefix->addr.family == CIDR_AF_INET)
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&((IPv4Network *)self)->prefix, prefix,
+		       sizeof(cidr_prefix_t));
+	else
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&((IPv6Network *)self)->prefix, prefix,
+		       sizeof(cidr_prefix_t));
+	return self;
+}
+
+/*
+ * binding_parse_cidr_string - parse a CIDR string into a cidr_prefix_t
+ *                             with strict/non-strict control.
+ *
+ * strict=True:  delegate to cidr_prefix_parse() which rejects host bits.
+ * strict=False: parse address and prefix length separately, then call
+ *               cidr_prefix_from_host() which zeros host bits explicitly.
+ *               See ARCHITECTURE.md §8.7.1.
+ *
+ * Returns 0 on success, -1 on error (exception set).
+ */
+static int
+binding_parse_cidr_string(const char *s, cidr_prefix_t *out,
+                          cidr_family_t expected, int strict)
+{
+	cidr_err_t rc;
+
+	if (strict) {
+		rc = cidr_prefix_parse(s, out);
+		if (rc != CIDR_OK)
+			return cidr_set_python_error(rc, s);
+		if (out->addr.family != expected) {
+			PyErr_SetString(libcidr_FamilyError,
+			                "address family mismatch");
+			return -1;
+		}
+		return 0;
+	}
+
+	/*
+	 * Non-strict: split at the last '/', parse addr and pfxlen
+	 * separately, then zero host bits via cidr_prefix_from_host().
+	 */
+	const char *slash = strrchr(s, '/');
+	if (slash == NULL) {
+		PyErr_SetString(libcidr_ParseError,
+		                "missing '/' in CIDR notation");
+		return -1;
+	}
+
+	/* Parse the address part (up to the slash). */
+	size_t addr_len = (size_t)(slash - s);
+	char addr_buf[CIDR_ADDR_STR_MAX];
+	cidr_addr_t addr;
+	if (addr_len >= sizeof(addr_buf)) {
+		PyErr_SetString(libcidr_ParseError, "address part too long");
+		return -1;
+	}
+	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+	memcpy(addr_buf, s, addr_len);
+	addr_buf[addr_len] = '\0';
+
+	rc = cidr_addr_parse(addr_buf, &addr);
+	if (rc != CIDR_OK)
+		return cidr_set_python_error(rc, addr_buf);
+	if (addr.family != expected) {
+		PyErr_SetString(libcidr_FamilyError, "address family mismatch");
+		return -1;
+	}
+
+	/* Parse the prefix length. */
+	char *end;
+	long pfxlen = strtol(slash + 1, &end, 10);
+	if (*end != '\0' || pfxlen < 0 ||
+	    (size_t)pfxlen > (expected == CIDR_AF_INET ? 32U : 128U)) {
+		PyErr_SetString(libcidr_PrefixLengthError,
+		                "invalid prefix length");
+		return -1;
+	}
+
+	/* cidr_prefix_from_host zeros host bits explicitly. */
+	rc = cidr_prefix_from_host(&addr, (uint8_t)pfxlen, out);
+	if (rc != CIDR_OK)
+		return cidr_set_python_error(rc, NULL);
+	return 0;
+}
+
+/*
+ * binding_tuple_to_prefix - parse a (address_string, prefixlen) tuple
+ *                           into a cidr_prefix_t with strict control.
+ *
+ * strict=True:  parse address, construct prefix, verify no host bits.
+ * strict=False: parse address, call cidr_prefix_from_host().
+ *
+ * Returns 0 on success, -1 on error (exception set).
+ */
+static int
+binding_tuple_to_prefix(PyObject *tuple, cidr_prefix_t *out,
+                        cidr_family_t expected, int strict)
+{
+	PyObject *addr_obj;
+	PyObject *pfxlen_obj;
+	long pfxlen;
+	cidr_addr_t addr;
+	cidr_prefix_t tmp;
+	cidr_err_t rc;
+
+	if (!PyArg_ParseTuple(tuple, "OO", &addr_obj, &pfxlen_obj))
+		return -1;
+
+	/* Parse the address part. */
+	if (PyUnicode_Check(addr_obj)) {
+		if (binding_string_to_addr(addr_obj, &addr, expected) < 0)
+			return -1;
+	} else if (PyObject_TypeCheck(addr_obj, ipv4address_type) ||
+	           PyObject_TypeCheck(addr_obj, ipv6address_type)) {
+		const cidr_addr_t *src = (expected == CIDR_AF_INET)
+		                             ? &((IPv4Address *)addr_obj)->addr
+		                             : &((IPv6Address *)addr_obj)->addr;
+		if (src->family != expected) {
+			PyErr_SetString(libcidr_FamilyError,
+			                "address family mismatch");
+			return -1;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&addr, src, sizeof(addr));
+	} else {
+		PyErr_SetString(PyExc_TypeError,
+		                "address string or address object expected");
+		return -1;
+	}
+
+	/* Parse the prefix length. */
+	pfxlen = PyLong_AsLong(pfxlen_obj);
+	if (pfxlen == -1 && PyErr_Occurred())
+		return -1;
+	if (pfxlen < 0 ||
+	    (size_t)pfxlen > (expected == CIDR_AF_INET ? 32U : 128U)) {
+		PyErr_SetString(libcidr_PrefixLengthError,
+		                "prefix length out of range");
+		return -1;
+	}
+
+	if (strict) {
+		/*
+		 * Construct via from_host (zeros host bits), then verify
+		 * that no zeroing was needed. Compare only the active
+		 * address bytes for the family to avoid reading
+		 * uninitialised union padding.
+		 */
+		rc = cidr_prefix_from_host(&addr, (uint8_t)pfxlen, &tmp);
+		if (rc != CIDR_OK)
+			return cidr_set_python_error(rc, NULL);
+
+		/* Compare address bytes based on family. */
+		size_t addr_bytes = (expected == CIDR_AF_INET) ? 4 : 16;
+		const uint8_t *orig =
+		    (expected == CIDR_AF_INET) ? addr.addr.v4 : addr.addr.v6;
+		const uint8_t *masked = (expected == CIDR_AF_INET)
+		                            ? tmp.addr.addr.v4
+		                            : tmp.addr.addr.v6;
+		if (memcmp(orig, masked, addr_bytes) != 0) {
+			PyErr_SetString(libcidr_HostBitsError,
+			                "host bits set in prefix");
+			return -1;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(out, &tmp, sizeof(*out));
+	} else {
+		rc = cidr_prefix_from_host(&addr, (uint8_t)pfxlen, out);
+		if (rc != CIDR_OK)
+			return cidr_set_python_error(rc, NULL);
+	}
+	return 0;
+}
+
+/*
+ * prefix_extract_ipaddress - extract cidr_prefix_t from an ipaddress
+ *                            network object.
+ *
+ * ipaddress.IPv4Network/.IPv6Network have packed on their .network_address,
+ * not directly. We extract network_address.packed and prefixlen.
+ *
+ * Returns 0 on success, -1 on error (exception set).
+ */
+static int
+prefix_extract_ipaddress(PyObject *obj, cidr_prefix_t *out,
+                         cidr_family_t expected)
+{
+	PyObject *net_addr;
+	PyObject *packed;
+	PyObject *pfxlen_obj;
+	const char *buf;
+	long pfxlen;
+	size_t want;
+
+	/* Get the network_address object from the ipaddress network. */
+	net_addr = PyObject_GetAttrString(obj, "network_address");
+	if (net_addr == NULL) {
+		PyErr_Clear();
+		PyErr_Format(PyExc_TypeError,
+		             "cannot construct %s from non-ipaddress object",
+		             expected == CIDR_AF_INET ? "IPv4Network"
+		                                      : "IPv6Network");
+		return -1;
+	}
+
+	/* Get packed bytes from the network address object. */
+	packed = PyObject_GetAttrString(net_addr, "packed");
+	Py_DECREF(net_addr);
+	if (packed == NULL) {
+		Py_DECREF(packed);
+		return -1;
+	}
+
+	if (!PyBytes_Check(packed)) {
+		Py_DECREF(packed);
+		PyErr_Format(PyExc_TypeError,
+		             "'network_address.packed' is not bytes");
+		return -1;
+	}
+
+	want = (expected == CIDR_AF_INET) ? 4 : 16;
+	if ((size_t)PyBytes_Size(packed) != want) {
+		Py_DECREF(packed);
+		PyErr_SetString(libcidr_FamilyError, "address family mismatch");
+		return -1;
+	}
+
+	buf = PyBytes_AsString(packed);
+	out->addr.family = expected;
+	if (expected == CIDR_AF_INET)
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(out->addr.addr.v4, buf, 4);
+	else
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(out->addr.addr.v6, buf, 16);
+	Py_DECREF(packed);
+
+	pfxlen_obj = PyObject_GetAttrString(obj, "prefixlen");
+	if (pfxlen_obj == NULL)
+		return -1;
+	pfxlen = PyLong_AsLong(pfxlen_obj);
+	Py_DECREF(pfxlen_obj);
+	if (pfxlen == -1 && PyErr_Occurred())
+		return -1;
+	out->pfxlen = (uint8_t)pfxlen;
+	return 0;
+}
+
+/* -------------------------------------------------------------------
+ * tp_new constructors.
+ * Accept: string CIDR, (addr_str, pfxlen) tuple, ipaddress object.
+ * strict= keyword-only argument (default True).
+ * See ARCHITECTURE.md §8.7.1.
+ * ------------------------------------------------------------------- */
+
+/*
+ * Network constructor implementation shared by IPv4Network and
+ * IPv6Network.
+ *
+ * arg:       the positional argument (string, tuple, or object)
+ * expected:  the expected address family
+ * strict:    whether host bits are rejected (1) or zeroed (0)
+ * out:       receives the constructed cidr_prefix_t
+ *
+ * Returns 0 on success, -1 on error (exception set).
+ */
+static int
+network_construct_impl(PyObject *arg, cidr_family_t expected, int strict,
+                       cidr_prefix_t *out)
+{
+	if (PyUnicode_Check(arg)) {
+		PyObject *utf8;
+		const char *s;
+		int rc;
+
+		utf8 = PyUnicode_AsEncodedString(arg, "utf-8", "strict");
+		if (utf8 == NULL)
+			return -1;
+		s = PyBytes_AsString(utf8);
+		if (s == NULL) {
+			Py_DECREF(utf8);
+			return -1;
+		}
+		rc = binding_parse_cidr_string(s, out, expected, strict);
+		Py_DECREF(utf8);
+		return rc;
+	}
+
+	if (PyTuple_Check(arg))
+		return binding_tuple_to_prefix(arg, out, expected, strict);
+
+	/* Assume ipaddress object; strict is ignored per §8.7.1. */
+	return prefix_extract_ipaddress(arg, out, expected);
+}
+
+static PyObject *
+ipv4network_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+	PyObject *arg;
+	cidr_prefix_t prefix;
+	int strict = 1;
+	IPv4Network *self;
+
+	static char *kwlist[] = {"", "strict", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &arg,
+	                                 &strict))
+		return NULL;
+
+	prefix.addr.family = CIDR_AF_UNSPEC;
+
+	if (network_construct_impl(arg, CIDR_AF_INET, strict, &prefix) < 0)
+		return NULL;
+
+	self = (IPv4Network *)PyType_GenericNew(type, NULL, NULL);
+	if (self == NULL)
+		return NULL;
+	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+	memcpy(&self->prefix, &prefix, sizeof(cidr_prefix_t));
+	return (PyObject *)self;
+}
+
+static PyObject *
+ipv6network_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+	PyObject *arg;
+	cidr_prefix_t prefix;
+	int strict = 1;
+	IPv6Network *self;
+
+	static char *kwlist[] = {"", "strict", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|p", kwlist, &arg,
+	                                 &strict))
+		return NULL;
+
+	prefix.addr.family = CIDR_AF_UNSPEC;
+
+	if (network_construct_impl(arg, CIDR_AF_INET6, strict, &prefix) < 0)
+		return NULL;
+
+	self = (IPv6Network *)PyType_GenericNew(type, NULL, NULL);
+	if (self == NULL)
+		return NULL;
+	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+	memcpy(&self->prefix, &prefix, sizeof(cidr_prefix_t));
+	return (PyObject *)self;
+}
+
+/* -------------------------------------------------------------------
+ * tp_dealloc.
+ * No heap-allocated members to free; just the base object dealloc.
+ * See ARCHITECTURE.md §8.10.
+ * ------------------------------------------------------------------- */
+
+static void
+ipv4network_dealloc(PyObject *self)
+{
+	PyObject_Del(self);
+}
+
+static void
+ipv6network_dealloc(PyObject *self)
+{
+	PyObject_Del(self);
+}
+
+/* -------------------------------------------------------------------
+ * Property getters.
+ * All properties are read-only per ARCHITECTURE.md §8.7.2.
+ * ------------------------------------------------------------------- */
+
+static PyObject *
+ipv4network_get_network_address(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+
+	(void)closure;
+	return binding_addr_to_pyobj(&n->prefix.addr);
+}
+
+static PyObject *
+ipv6network_get_network_address(PyObject *self, void *closure)
+{
+	IPv6Network *n = (IPv6Network *)self;
+
+	(void)closure;
+	return binding_addr_to_pyobj(&n->prefix.addr);
+}
+
+static PyObject *
+ipv4network_get_broadcast_address(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	cidr_addr_t bcast;
+	cidr_err_t rc;
+
+	(void)closure;
+	rc = cidr_prefix_broadcast(&n->prefix, &bcast);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return binding_addr_to_pyobj(&bcast);
+}
+
+static PyObject *
+ipv6network_get_broadcast_address(PyObject *self, void *closure)
+{
+	(void)self;
+	(void)closure;
+	PyErr_SetString(libcidr_FamilyError,
+	                "broadcast_address is not defined for IPv6 networks");
+	return NULL;
+}
+
+static PyObject *
+ipv4network_get_prefixlen(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+
+	(void)closure;
+	return PyLong_FromLong((long)n->prefix.pfxlen);
+}
+
+static PyObject *
+ipv6network_get_prefixlen(PyObject *self, void *closure)
+{
+	IPv6Network *n = (IPv6Network *)self;
+
+	(void)closure;
+	return PyLong_FromLong((long)n->prefix.pfxlen);
+}
+
+static PyObject *
+ipv4network_get_netmask(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	cidr_addr_t mask;
+	cidr_err_t rc;
+
+	(void)closure;
+	rc = cidr_prefix_mask(&n->prefix, &mask);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	mask.family = CIDR_AF_INET;
+	return binding_addr_to_pyobj(&mask);
+}
+
+static PyObject *
+ipv6network_get_netmask(PyObject *self, void *closure)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	cidr_addr_t mask;
+	cidr_err_t rc;
+
+	(void)closure;
+	rc = cidr_prefix_mask(&n->prefix, &mask);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	mask.family = CIDR_AF_INET6;
+	return binding_addr_to_pyobj(&mask);
+}
+
+static PyObject *
+ipv4network_get_with_prefixlen(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	(void)closure;
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromString(buf);
+}
+
+static PyObject *
+ipv6network_get_with_prefixlen(PyObject *self, void *closure)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	(void)closure;
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromString(buf);
+}
+
+static PyObject *
+ipv4network_get_version(PyObject *self, void *closure)
+{
+	(void)self;
+	(void)closure;
+	return PyLong_FromLong(4);
+}
+
+static PyObject *
+ipv6network_get_version(PyObject *self, void *closure)
+{
+	(void)self;
+	(void)closure;
+	return PyLong_FromLong(6);
+}
+
+/*
+ * num_addresses - compute 2^(max_pfxlen - prefix->pfxlen) as a Python int.
+ * Uses uint64_t arithmetic for small shifts (< 64 bits) and Python big
+ * integer arithmetic for larger shifts.
+ */
+static PyObject *
+network_num_addresses(cidr_family_t family, uint8_t pfxlen)
+{
+	int max_bits = (family == CIDR_AF_INET) ? 32 : 128;
+	int shift = max_bits - pfxlen;
+
+	if (shift < 0) {
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "prefix length exceeds maximum for family");
+		return NULL;
+	}
+
+	if ((size_t)shift < 64) {
+		/* SAFETY: shift < 64 ensures 1ULL << shift is well-defined.*/
+		return PyLong_FromUnsignedLongLong(1ULL << shift);
+	}
+
+	/* Shift >= 64: use Python big integer left shift. */
+	PyObject *one = PyLong_FromLong(1);
+	if (one == NULL)
+		return NULL;
+	PyObject *shift_obj = PyLong_FromLong((long)shift);
+	if (shift_obj == NULL) {
+		Py_DECREF(one);
+		return NULL;
+	}
+	PyObject *result = PyNumber_Lshift(one, shift_obj);
+	Py_DECREF(shift_obj);
+	Py_DECREF(one);
+	return result;
+}
+
+static PyObject *
+ipv4network_get_num_addresses(PyObject *self, void *closure)
+{
+	IPv4Network *n = (IPv4Network *)self;
+
+	(void)closure;
+	return network_num_addresses(CIDR_AF_INET, n->prefix.pfxlen);
+}
+
+static PyObject *
+ipv6network_get_num_addresses(PyObject *self, void *closure)
+{
+	IPv6Network *n = (IPv6Network *)self;
+
+	(void)closure;
+	return network_num_addresses(CIDR_AF_INET6, n->prefix.pfxlen);
+}
+
+/* -------------------------------------------------------------------
+ * Methods.
+ * See ARCHITECTURE.md §8.7.3.
+ * ------------------------------------------------------------------- */
+
+/*
+ * overlaps(other) -> bool
+ *
+ * Returns True if this network and other share at least one address.
+ * Backed by cidr_prefix_overlaps(). Raises FamilyError on cross-family.
+ */
+static PyObject *
+ipv4network_overlaps(PyObject *self, PyObject *args)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	PyObject *other;
+	const cidr_prefix_t *other_prefix;
+	bool result;
+	cidr_err_t rc;
+
+	if (!PyArg_ParseTuple(args, "O", &other))
+		return NULL;
+
+	if (PyObject_TypeCheck(other, ipv4network_type))
+		other_prefix = &((IPv4Network *)other)->prefix;
+	else if (PyObject_TypeCheck(other, ipv6network_type))
+		other_prefix = &((IPv6Network *)other)->prefix;
+	else {
+		PyErr_SetString(PyExc_TypeError,
+		                "IPv4Network or IPv6Network expected");
+		return NULL;
+	}
+
+	rc = cidr_prefix_overlaps(&n->prefix, other_prefix, &result);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	if (result) {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
+	Py_INCREF(Py_False);
+	return Py_False;
+}
+
+static PyObject *
+ipv6network_overlaps(PyObject *self, PyObject *args)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	PyObject *other;
+	const cidr_prefix_t *other_prefix;
+	bool result;
+	cidr_err_t rc;
+
+	if (!PyArg_ParseTuple(args, "O", &other))
+		return NULL;
+
+	if (PyObject_TypeCheck(other, ipv4network_type))
+		other_prefix = &((IPv4Network *)other)->prefix;
+	else if (PyObject_TypeCheck(other, ipv6network_type))
+		other_prefix = &((IPv6Network *)other)->prefix;
+	else {
+		PyErr_SetString(PyExc_TypeError,
+		                "IPv4Network or IPv6Network expected");
+		return NULL;
+	}
+
+	rc = cidr_prefix_overlaps(&n->prefix, other_prefix, &result);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	if (result) {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
+	Py_INCREF(Py_False);
+	return Py_False;
+}
+
+/*
+ * supernet() -> IPv4Network | IPv6Network
+ *
+ * Returns the parent network at prefixlen - 1.
+ * Raises AddressOverflowError on /0.
+ * Backed by cidr_prefix_supernet(). See ARCHITECTURE.md §8.7.3.
+ */
+static PyObject *
+ipv4network_supernet(PyObject *self, PyObject *noargs)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	cidr_prefix_t parent;
+	cidr_err_t rc;
+
+	(void)noargs;
+	rc = cidr_prefix_supernet(&n->prefix, &parent);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return binding_prefix_to_pyobj(&parent);
+}
+
+static PyObject *
+ipv6network_supernet(PyObject *self, PyObject *noargs)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	cidr_prefix_t parent;
+	cidr_err_t rc;
+
+	(void)noargs;
+	rc = cidr_prefix_supernet(&n->prefix, &parent);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return binding_prefix_to_pyobj(&parent);
+}
+
+/*
+ * subnets(prefixlen) -> iterator
+ *
+ * Returns a SubnetIterator over all subnets at the given prefix length.
+ * Backed by cidr_subnet_iter_init/next. See ARCHITECTURE.md §8.7.3, §8.9.
+ */
+static PyObject *
+network_subnets_impl(const cidr_prefix_t *prefix, cidr_family_t family,
+                     PyObject *args, PyObject *kwargs)
+{
+	SubnetIterator *iter_obj;
+	int target_pfxlen;
+	cidr_err_t rc;
+
+	static char *kwlist[] = {"prefixlen", NULL};
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i", kwlist,
+	                                 &target_pfxlen))
+		return NULL;
+
+	iter_obj = (SubnetIterator *)PyType_GenericNew(subnetiterator_type,
+	                                               NULL, NULL);
+	if (iter_obj == NULL)
+		return NULL;
+
+	rc = cidr_subnet_iter_init(&iter_obj->iter, prefix,
+	                           (uint8_t)target_pfxlen);
+	if (rc != CIDR_OK) {
+		Py_DECREF(iter_obj);
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+
+	iter_obj->family = family;
+	return (PyObject *)iter_obj;
+}
+
+static PyObject *
+ipv4network_subnets(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+	IPv4Network *n = (IPv4Network *)self;
+
+	return network_subnets_impl(&n->prefix, CIDR_AF_INET, args, kwargs);
+}
+
+static PyObject *
+ipv6network_subnets(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+	IPv6Network *n = (IPv6Network *)self;
+
+	return network_subnets_impl(&n->prefix, CIDR_AF_INET6, args, kwargs);
+}
+
+/*
+ * Contains implementation shared by contains() method and __contains__.
+ *
+ * Accepts: IPv4Address, IPv6Address, or string.
+ * Returns: 1 if contained, 0 if not, -1 on error (exception set).
+ */
+static int
+network_contains_impl(cidr_prefix_t *prefix, PyObject *addr_obj)
+{
+	cidr_addr_t addr;
+	bool result;
+	cidr_err_t rc;
+	cidr_family_t expected = prefix->addr.family;
+
+	if (PyObject_TypeCheck(addr_obj, ipv4address_type)) {
+		if (expected != CIDR_AF_INET) {
+			PyErr_SetString(libcidr_FamilyError,
+			                "address family mismatch");
+			return -1;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&addr, &((IPv4Address *)addr_obj)->addr, sizeof(addr));
+	} else if (PyObject_TypeCheck(addr_obj, ipv6address_type)) {
+		if (expected != CIDR_AF_INET6) {
+			PyErr_SetString(libcidr_FamilyError,
+			                "address family mismatch");
+			return -1;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&addr, &((IPv6Address *)addr_obj)->addr, sizeof(addr));
+	} else if (PyUnicode_Check(addr_obj)) {
+		if (binding_string_to_addr(addr_obj, &addr, expected) < 0)
+			return -1;
+	} else {
+		PyErr_SetString(PyExc_TypeError,
+		                "address string or address object expected");
+		return -1;
+	}
+
+	rc = cidr_prefix_contains(prefix, &addr, &result);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return -1;
+	}
+	return result ? 1 : 0;
+}
+
+/*
+ * contains(addr) -> bool
+ *
+ * Returns True if addr falls within this network.
+ * Explicit complement to __contains__. See ARCHITECTURE.md §8.7.3.
+ */
+static PyObject *
+ipv4network_contains(PyObject *self, PyObject *args)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	PyObject *addr_obj;
+	int r;
+
+	if (!PyArg_ParseTuple(args, "O", &addr_obj))
+		return NULL;
+	r = network_contains_impl(&n->prefix, addr_obj);
+	if (r < 0)
+		return NULL;
+	if (r) {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
+	Py_INCREF(Py_False);
+	return Py_False;
+}
+
+static PyObject *
+ipv6network_contains(PyObject *self, PyObject *args)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	PyObject *addr_obj;
+	int r;
+
+	if (!PyArg_ParseTuple(args, "O", &addr_obj))
+		return NULL;
+	r = network_contains_impl(&n->prefix, addr_obj);
+	if (r < 0)
+		return NULL;
+	if (r) {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
+	Py_INCREF(Py_False);
+	return Py_False;
+}
+
+/* -------------------------------------------------------------------
+ * Protocol: __str__, __repr__, __hash__, __contains__.
+ * See ARCHITECTURE.md §8.7.4.
+ * ------------------------------------------------------------------- */
+
+static PyObject *
+ipv4network_str(PyObject *self)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromString(buf);
+}
+
+static PyObject *
+ipv6network_str(PyObject *self)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromString(buf);
+}
+
+static PyObject *
+ipv4network_repr(PyObject *self)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromFormat("IPv4Network('%s')", buf);
+}
+
+static PyObject *
+ipv6network_repr(PyObject *self)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	char buf[CIDR_PREFIX_STR_MAX];
+	cidr_err_t rc;
+
+	rc = cidr_prefix_format(&n->prefix, buf, sizeof(buf));
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+	return PyUnicode_FromFormat("IPv6Network('%s')", buf);
+}
+
+/* djb2-derived hash of family + address bytes + prefix length. */
+static Py_hash_t
+ipv4network_hash(PyObject *self)
+{
+	IPv4Network *n = (IPv4Network *)self;
+	const uint8_t *v4 = n->prefix.addr.addr.v4;
+	Py_hash_t h = 5381;
+
+	/*
+	 * SAFETY: family is guaranteed to be CIDR_AF_INET for a valid
+	 * IPv4Network instance. No hash state is shared with IPv6.
+	 */
+	h = ((h << 5) + h) + (Py_hash_t)n->prefix.addr.family;
+	for (int i = 0; i < 4; i++)
+		h = ((h << 5) + h) + (Py_hash_t)v4[i];
+	h = ((h << 5) + h) + (Py_hash_t)n->prefix.pfxlen;
+	return h;
+}
+
+static Py_hash_t
+ipv6network_hash(PyObject *self)
+{
+	IPv6Network *n = (IPv6Network *)self;
+	const uint8_t *v6 = n->prefix.addr.addr.v6;
+	Py_hash_t h = 5381;
+
+	/*
+	 * SAFETY: family is guaranteed to be CIDR_AF_INET6 for a valid
+	 * IPv6Network instance. No hash state is shared with IPv4.
+	 */
+	h = ((h << 5) + h) + (Py_hash_t)n->prefix.addr.family;
+	for (int i = 0; i < 16; i++)
+		h = ((h << 5) + h) + (Py_hash_t)v6[i];
+	h = ((h << 5) + h) + (Py_hash_t)n->prefix.pfxlen;
+	return h;
+}
+
+/*
+ * sq_contains / __contains__ — implements "addr in network" syntax.
+ * Delegates to network_contains_impl(). See ARCHITECTURE.md §8.7.4.
+ * Returns 1 for contained, 0 for not, -1 on error (exception set).
+ */
+static int
+ipv4network_contains_slot(PyObject *self, PyObject *value)
+{
+	int r = network_contains_impl(&((IPv4Network *)self)->prefix, value);
+
+	if (r < 0)
+		return -1;
+	return r;
+}
+
+static int
+ipv6network_contains_slot(PyObject *self, PyObject *value)
+{
+	int r = network_contains_impl(&((IPv6Network *)self)->prefix, value);
+
+	if (r < 0)
+		return -1;
+	return r;
+}
+
+/* -------------------------------------------------------------------
+ * Rich comparison: __eq__, __ne__, __lt__, __le__, __gt__, __ge__.
+ * Uses cidr_prefix_cmp() for ordering per ARCHITECTURE.md §8.7.4.
+ * ------------------------------------------------------------------- */
+
+static PyObject *
+ipv4network_richcmp(PyObject *a, PyObject *b, int op)
+{
+	PyObject *result;
+	int cmp;
+	cidr_err_t rc;
+
+	if (!PyObject_TypeCheck(b, ipv4network_type)) {
+		if (PyObject_TypeCheck(b, ipv6network_type)) {
+			cidr_set_python_error(CIDR_ERR_FAMILY, NULL);
+			return NULL;
+		}
+		Py_RETURN_NOTIMPLEMENTED;
+	}
+
+	rc = cidr_prefix_cmp(&((IPv4Network *)a)->prefix,
+	                     &((IPv4Network *)b)->prefix, &cmp);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+
+	switch (op) {
+	case Py_EQ:
+		result = (cmp == 0) ? Py_True : Py_False;
+		break;
+	case Py_NE:
+		result = (cmp != 0) ? Py_True : Py_False;
+		break;
+	case Py_LT:
+		result = (cmp < 0) ? Py_True : Py_False;
+		break;
+	case Py_LE:
+		result = (cmp <= 0) ? Py_True : Py_False;
+		break;
+	case Py_GT:
+		result = (cmp > 0) ? Py_True : Py_False;
+		break;
+	case Py_GE:
+		result = (cmp >= 0) ? Py_True : Py_False;
+		break;
+	default:
+		Py_RETURN_NOTIMPLEMENTED;
+	}
+	Py_INCREF(result);
+	return result;
+}
+
+static PyObject *
+ipv6network_richcmp(PyObject *a, PyObject *b, int op)
+{
+	PyObject *result;
+	int cmp;
+	cidr_err_t rc;
+
+	if (!PyObject_TypeCheck(b, ipv6network_type)) {
+		if (PyObject_TypeCheck(b, ipv4network_type)) {
+			cidr_set_python_error(CIDR_ERR_FAMILY, NULL);
+			return NULL;
+		}
+		Py_RETURN_NOTIMPLEMENTED;
+	}
+
+	rc = cidr_prefix_cmp(&((IPv6Network *)a)->prefix,
+	                     &((IPv6Network *)b)->prefix, &cmp);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+
+	switch (op) {
+	case Py_EQ:
+		result = (cmp == 0) ? Py_True : Py_False;
+		break;
+	case Py_NE:
+		result = (cmp != 0) ? Py_True : Py_False;
+		break;
+	case Py_LT:
+		result = (cmp < 0) ? Py_True : Py_False;
+		break;
+	case Py_LE:
+		result = (cmp <= 0) ? Py_True : Py_False;
+		break;
+	case Py_GT:
+		result = (cmp > 0) ? Py_True : Py_False;
+		break;
+	case Py_GE:
+		result = (cmp >= 0) ? Py_True : Py_False;
+		break;
+	default:
+		Py_RETURN_NOTIMPLEMENTED;
+	}
+	Py_INCREF(result);
+	return result;
+}
+
+/* -------------------------------------------------------------------
+ * PyGetSetDef tables.
+ * ------------------------------------------------------------------- */
+
+static PyGetSetDef ipv4network_getset[] = {
+    {"network_address", ipv4network_get_network_address, NULL,
+     "network address (host bits zero)", NULL},
+    {"broadcast_address", ipv4network_get_broadcast_address, NULL,
+     "broadcast address (IPv4 only)", NULL},
+    {"prefixlen", ipv4network_get_prefixlen, NULL, "prefix length", NULL},
+    {"netmask", ipv4network_get_netmask, NULL, "prefix mask", NULL},
+    {"with_prefixlen", ipv4network_get_with_prefixlen, NULL,
+     "canonical CIDR string", NULL},
+    {"version", ipv4network_get_version, NULL, "address family version (4)",
+     NULL},
+    {"num_addresses", ipv4network_get_num_addresses, NULL,
+     "total number of addresses in this network", NULL},
+    {NULL, NULL, NULL, NULL, NULL}};
+
+static PyGetSetDef ipv6network_getset[] = {
+    {"network_address", ipv6network_get_network_address, NULL,
+     "network address (host bits zero)", NULL},
+    {"broadcast_address", ipv6network_get_broadcast_address, NULL,
+     "broadcast address (IPv4 only; raises FamilyError on IPv6)", NULL},
+    {"prefixlen", ipv6network_get_prefixlen, NULL, "prefix length", NULL},
+    {"netmask", ipv6network_get_netmask, NULL, "prefix mask", NULL},
+    {"with_prefixlen", ipv6network_get_with_prefixlen, NULL,
+     "canonical CIDR string", NULL},
+    {"version", ipv6network_get_version, NULL, "address family version (6)",
+     NULL},
+    {"num_addresses", ipv6network_get_num_addresses, NULL,
+     "total number of addresses in this network", NULL},
+    {NULL, NULL, NULL, NULL, NULL}};
+
+/* -------------------------------------------------------------------
+ * PyMethodDef tables.
+ * ------------------------------------------------------------------- */
+
+static PyMethodDef ipv4network_methods[] = {
+    {"overlaps", ipv4network_overlaps, METH_VARARGS,
+     "overlaps(other) -> bool\n\n"
+     "Return True if this network and other share any address."},
+    {"supernet", ipv4network_supernet, METH_NOARGS,
+     "supernet() -> IPv4Network\n\n"
+     "Return the parent network at prefixlen - 1."},
+    {"subnets", (PyCFunction)(void (*)(void))ipv4network_subnets,
+     METH_VARARGS | METH_KEYWORDS,
+     "subnets(prefixlen) -> iterator\n\n"
+     "Return an iterator over all subnets at the given prefix length."},
+    {"contains", ipv4network_contains, METH_VARARGS,
+     "contains(addr) -> bool\n\n"
+     "Return True if addr falls within this network."},
+    {NULL, NULL, 0, NULL}};
+
+static PyMethodDef ipv6network_methods[] = {
+    {"overlaps", ipv6network_overlaps, METH_VARARGS,
+     "overlaps(other) -> bool\n\n"
+     "Return True if this network and other share any address."},
+    {"supernet", ipv6network_supernet, METH_NOARGS,
+     "supernet() -> IPv6Network\n\n"
+     "Return the parent network at prefixlen - 1."},
+    {"subnets", (PyCFunction)(void (*)(void))ipv6network_subnets,
+     METH_VARARGS | METH_KEYWORDS,
+     "subnets(prefixlen) -> iterator\n\n"
+     "Return an iterator over all subnets at the given prefix length."},
+    {"contains", ipv6network_contains, METH_VARARGS,
+     "contains(addr) -> bool\n\n"
+     "Return True if addr falls within this network."},
+    {NULL, NULL, 0, NULL}};
+
+/* -------------------------------------------------------------------
+ * PyType_Slot arrays and PyType_Spec definitions.
+ * ------------------------------------------------------------------- */
+
+static PyType_Slot ipv4network_slots[] = {
+    {Py_tp_new, (void *)ipv4network_new},
+    {Py_tp_dealloc, (void *)ipv4network_dealloc},
+    {Py_tp_richcompare, (void *)ipv4network_richcmp},
+    {Py_tp_hash, (void *)ipv4network_hash},
+    {Py_tp_str, (void *)ipv4network_str},
+    {Py_tp_repr, (void *)ipv4network_repr},
+    {Py_sq_contains, (void *)ipv4network_contains_slot},
+    {Py_tp_methods, (void *)ipv4network_methods},
+    {Py_tp_getset, (void *)ipv4network_getset},
+    {Py_tp_doc, (void *)"IPv4 network (CIDR prefix)."},
+    {0, NULL}};
+
+static PyType_Slot ipv6network_slots[] = {
+    {Py_tp_new, (void *)ipv6network_new},
+    {Py_tp_dealloc, (void *)ipv6network_dealloc},
+    {Py_tp_richcompare, (void *)ipv6network_richcmp},
+    {Py_tp_hash, (void *)ipv6network_hash},
+    {Py_tp_str, (void *)ipv6network_str},
+    {Py_tp_repr, (void *)ipv6network_repr},
+    {Py_sq_contains, (void *)ipv6network_contains_slot},
+    {Py_tp_methods, (void *)ipv6network_methods},
+    {Py_tp_getset, (void *)ipv6network_getset},
+    {Py_tp_doc, (void *)"IPv6 network (CIDR prefix)."},
+    {0, NULL}};
+
+static PyType_Spec ipv4network_spec = {"libcidr.IPv4Network",
+                                       sizeof(IPv4Network), 0,
+                                       Py_TPFLAGS_DEFAULT, ipv4network_slots};
+
+static PyType_Spec ipv6network_spec = {"libcidr.IPv6Network",
+                                       sizeof(IPv6Network), 0,
+                                       Py_TPFLAGS_DEFAULT, ipv6network_slots};
+
+/* ===================================================================
+ * SubnetIterator type.
+ * See ARCHITECTURE.md §8.9, CODING_STANDARDS.md §6.
+ * =================================================================== */
+
+/*
+ * SubnetIterator struct is already defined above (needed by
+ * network_subnets_impl). The type provides __iter__ (return self)
+ * and __next__ (yield next network, StopIteration on CIDR_ERR_DONE).
+ */
+
+/* -------------------------------------------------------------------
+ * tp_dealloc.
+ * No heap-allocated members.
+ * ------------------------------------------------------------------- */
+
+static void
+subnetiterator_dealloc(PyObject *self)
+{
+	PyObject_Del(self);
+}
+
+/* -------------------------------------------------------------------
+ * __iter__: return self.
+ * ------------------------------------------------------------------- */
+
+static PyObject *
+subnetiterator_iter(PyObject *self)
+{
+	Py_INCREF(self);
+	return self;
+}
+
+/* -------------------------------------------------------------------
+ * __next__: yield the next subnet.
+ * Calls cidr_subnet_iter_next(). On CIDR_ERR_DONE raises StopIteration.
+ * On CIDR_OK constructs and returns the next network object.
+ * See ARCHITECTURE.md §8.9.
+ * ------------------------------------------------------------------- */
+
+static PyObject *
+subnetiterator_next(PyObject *self)
+{
+	SubnetIterator *si = (SubnetIterator *)self;
+	cidr_prefix_t subnet;
+	cidr_err_t rc;
+
+	rc = cidr_subnet_iter_next(&si->iter, &subnet);
+	if (rc == CIDR_ERR_DONE) {
+		PyErr_SetNone(PyExc_StopIteration);
+		return NULL;
+	}
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		return NULL;
+	}
+
+	return binding_prefix_to_pyobj(&subnet);
+}
+
+/* -------------------------------------------------------------------
+ * PyType_Slot arrays and PyType_Spec.
+ * ------------------------------------------------------------------- */
+
+static PyType_Slot subnetiterator_slots[] = {
+    {Py_tp_dealloc, (void *)subnetiterator_dealloc},
+    {Py_tp_iter, (void *)subnetiterator_iter},
+    {Py_tp_iternext, (void *)subnetiterator_next},
+    {Py_tp_doc, (void *)"Subnet iterator for CIDR prefix enumeration."},
+    {0, NULL}};
+
+static PyType_Spec subnetiterator_spec = {
+    "libcidr.SubnetIterator", sizeof(SubnetIterator), 0, Py_TPFLAGS_DEFAULT,
+    subnetiterator_slots};
+
 /*
  * Module method table.
  * Populated in later phases as module-level functions are added:
@@ -1383,6 +2721,41 @@ PyInit_libcidr(void)
 			goto error;
 	}
 
+	/* --- Type registration: IPv4Network, IPv6Network, SubnetIterator ---
+	 */
+	/* See ARCHITECTURE.md §8.7, §8.9. */
+
+	{
+		PyObject *v4ntype = PyType_FromSpec(&ipv4network_spec);
+
+		if (v4ntype == NULL)
+			goto error;
+		ipv4network_type = (PyTypeObject *)v4ntype;
+		Py_INCREF(v4ntype);
+		if (PyModule_AddObject(m, "IPv4Network", v4ntype) < 0)
+			goto error;
+	}
+	{
+		PyObject *v6ntype = PyType_FromSpec(&ipv6network_spec);
+
+		if (v6ntype == NULL)
+			goto error;
+		ipv6network_type = (PyTypeObject *)v6ntype;
+		Py_INCREF(v6ntype);
+		if (PyModule_AddObject(m, "IPv6Network", v6ntype) < 0)
+			goto error;
+	}
+	{
+		PyObject *stype = PyType_FromSpec(&subnetiterator_spec);
+
+		if (stype == NULL)
+			goto error;
+		subnetiterator_type = (PyTypeObject *)stype;
+		Py_INCREF(stype);
+		if (PyModule_AddObject(m, "SubnetIterator", stype) < 0)
+			goto error;
+	}
+
 	return m;
 
 error:
@@ -1390,6 +2763,12 @@ error:
 	ipv4address_type = NULL;
 	Py_XDECREF((PyObject *)ipv6address_type);
 	ipv6address_type = NULL;
+	Py_XDECREF((PyObject *)ipv4network_type);
+	ipv4network_type = NULL;
+	Py_XDECREF((PyObject *)ipv6network_type);
+	ipv6network_type = NULL;
+	Py_XDECREF((PyObject *)subnetiterator_type);
+	subnetiterator_type = NULL;
 	Py_DECREF(m);
 	return NULL;
 }

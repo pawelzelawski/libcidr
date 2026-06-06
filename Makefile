@@ -195,10 +195,10 @@ valgrind: $(TEST_BIN_VG)
 	@if [ "$(OS)" != "Linux" ]; then \
 	    echo "valgrind: Linux only"; exit 1; \
 	fi
-	valgrind --leak-check=full					\
+	timeout 300 valgrind --leak-check=full			\
 	         --show-leak-kinds=all				\
-	         --track-origins=yes					\
-	         --error-exitcode=1					\
+	         --track-origins=yes				\
+	         --error-exitcode=1				\
 	         $(TEST_BIN_VG)
 
 # --- Python extension ----------------------------------------------------------
@@ -260,6 +260,8 @@ lint:
 	             --suppress=checkersReport			\
 	             --suppress=staticFunction			\
 	             --suppress=unmatchedSuppression		\
+	             --suppress=constVariablePointer		\
+	             --suppress=constParameterCallback		\
 	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \

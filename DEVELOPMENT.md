@@ -15,7 +15,7 @@
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
-| 7 | Python Binding Layer | IN PROGRESS | 0/0 | CPython stable ABI extension |
+| 7 | Python Binding Layer | IN PROGRESS | 180/180 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
 ### Quality Milestones
@@ -879,7 +879,7 @@ no partial binding makes sense before all C components are tested and stable.
 - Implement protocol methods: `__str__`, `__repr__`, `__eq__`, `__hash__`,
   `__lt__`
 
-**7.3 -- `IPv4Network` and `IPv6Network` types**
+**7.3 -- `IPv4Network` and `IPv6Network` types** ✓ DONE
 - Define `IPv4Network` and `IPv6Network` C structs embedding `cidr_prefix_t`
   by value
 - Implement constructors per ARCHITECTURE.md §8.7.1: string, `(string, int)`
