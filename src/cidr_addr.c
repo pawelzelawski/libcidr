@@ -349,7 +349,8 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 		}
 		zero_groups = max_groups - total_explicit;
 
-		/* Build first 12 bytes from hex groups in network byte order. */
+		/* Build first 12 bytes from hex groups in network byte order.
+		 */
 		byte_idx = 0;
 		for (i = 0; i < before_count; i++) {
 			out->addr.v6[byte_idx++] = (uint8_t)(before[i] >> 8);

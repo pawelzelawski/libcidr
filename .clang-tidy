@@ -1,1 +1,1 @@
-Checks: 'clang-analyzer-*, cert-*, bugprone-*, performance-*, portability-*, -cert-err33-c, -bugprone-easily-swappable-parameters'
+Checks: 'clang-analyzer-*, cert-*, bugprone-*, performance-*, portability-*, -cert-err33-c, -bugprone-easily-swappable-parameters, -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling'

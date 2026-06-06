@@ -58,10 +58,11 @@ SANITIZERS != if printf 'int main(void){return 0;}\n' | \
 CFLAGS_DEV     = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
 	                 -O1 -g						\
 	                 $(SANITIZERS)					\
+	                 -fPIC						\
 	                 -DCIDR_STACK_CHECK				\
 	                 -DCIDR_TEST
 
-CFLAGS_RELEASE = $(CFLAGS_COMMON) $(CFLAGS_OS) -O2 -DNDEBUG
+CFLAGS_RELEASE = $(CFLAGS_COMMON) $(CFLAGS_OS) -O2 -DNDEBUG -fPIC
 
 CFLAGS_TSAN    = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
                  -O1 -g					\
@@ -71,6 +72,7 @@ CFLAGS_TSAN    = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
 
 CFLAGS_VG      = $(CFLAGS_COMMON) $(CFLAGS_OS)			\
                  -O1 -g					\
+                 -fPIC						\
                  -DCIDR_TEST
 
 # --- Source files -------------------------------------------------------------

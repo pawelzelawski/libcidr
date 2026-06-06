@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 7 -- Python Binding Layer (IN PROGRESS)
-**Next Task**: Phase 7.2 -- IPv4Address and IPv6Address types
+**Next Task**: Phase 7.3 -- IPv4Network and IPv6Network types
 
 ### Phase Summary
 
@@ -863,7 +863,7 @@ no partial binding makes sense before all C components are tested and stable.
 - Export module-level constants: all `CIDR_CLASS_*` values, `CIDR_IANA_SNAPSHOT`,
   `AF_INET = 4`, `AF_INET6 = 6`, `SORT_NETWORK_ASC`, `SORT_PFXLEN_DESC`
 
-**7.2 -- `IPv4Address` and `IPv6Address` types**
+**7.2 -- `IPv4Address` and `IPv6Address` types** ✓ DONE
 - Define `IPv4Address` and `IPv6Address` C structs embedding `cidr_addr_t`
   by value
 - Implement `PyType_FromSpec()` type definitions for both per
