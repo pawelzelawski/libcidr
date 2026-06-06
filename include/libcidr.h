@@ -757,4 +757,80 @@ cidr_err_t cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count,
 cidr_err_t cidr_addr_classify(const cidr_addr_t *addr, cidr_class_t *out)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_index_create - build a Patricia trie index from a prefix array.
+ *
+ * Builds an array-packed LC-trie (Level-Compressed Patricia trie) from the
+ * caller-provided prefix array. The prefix array is copied internally -- the
+ * caller may free or modify their array after the call returns. This is the
+ * only allocating function in the library; callers must balance every
+ * successful create with a cidr_index_destroy() call.
+ *
+ * prefixes:      caller-provided prefix array (all same family)
+ * count:         number of entries in prefixes; must be >= 1
+ * out:           receives pointer to the allocated index on success
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if prefixes or out is NULL, if count == 0, if
+ *   count > UINT32_MAX - 1, or if any prefix has addr.family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if the array contains mixed IPv4 and IPv6 prefixes.
+ * Returns CIDR_ERR_NOMEM on allocation failure.
+ *
+ * Complexity: O(n * W) where n is prefix count and W is address width in
+ * bits (32 for IPv4, 128 for IPv6). See ARCHITECTURE.md §6.2.
+ */
+cidr_err_t cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
+                             cidr_index_t **out)
+    __attribute__((warn_unused_result));
+
+/*
+ * cidr_index_destroy - release all memory for a Patricia trie index.
+ *
+ * Frees the node array, the copied prefix array, and the index struct.
+ * Must be called exactly once per index created by a successful
+ * cidr_index_create() call. NULL-safe: passing NULL is a valid no-op.
+ *
+ * index: pointer to an index previously returned by cidr_index_create(),
+ *        or NULL
+ *
+ * No error return -- destructors have no meaningful failure mode.
+ * See ARCHITECTURE.md §6.2.
+ */
+void cidr_index_destroy(cidr_index_t *index);
+
+/*
+ * cidr_index_lookup - longest-prefix match for each address in an array.
+ *
+ * For each address in addrs, traverses the index trie and writes the index
+ * of the longest-prefix match into matches[i], or -1 if no prefix matched.
+ * Lookup is O(address length) per query by construction of the LC-trie.
+ * Concurrent calls on the same index from multiple threads are safe (the
+ * index is immutable after cidr_index_create() completes).
+ *
+ * index:   pointer to a valid index (must not be NULL)
+ * addrs:   array of count addresses to query
+ * count:   number of entries in addrs and matches
+ * matches: caller-provided ssize_t array; receives match index or -1
+ * errs:    optional per-item error array (may be NULL)
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if index is NULL, if count > 0 and addrs or
+ *   matches is NULL, or if any address has family == CIDR_AF_UNSPEC.
+ * Returns CIDR_ERR_FAMILY if any address family does not match the index
+ *   family.
+ *
+ * When count == 0, returns CIDR_OK with no work performed per the empty
+ * array policy (ARCHITECTURE.md §3.4).
+ *
+ * Complexity: O(count * W) where W is address width in bits -- empirically
+ * O(4-8) for IPv4 and O(8-15) for IPv6 on real routing tables per
+ * ARCHITECTURE.md §6.3.
+ *
+ * See ARCHITECTURE.md §6.2 for the full lookup specification.
+ */
+cidr_err_t cidr_index_lookup(const cidr_index_t *index,
+                             const cidr_addr_t *addrs, size_t count,
+                             ssize_t *matches, cidr_err_t *errs)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

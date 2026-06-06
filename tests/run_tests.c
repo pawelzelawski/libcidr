@@ -145,6 +145,19 @@ extern int test_classify_boundary_first_last(void);
 extern int test_classify_null(void);
 extern int test_classify_unspec(void);
 
+/*
+ * test_index.c -- Phase 6: Patricia trie index tests.
+ * See DEVELOPMENT.md §Phase 6 Tests.
+ */
+extern int test_index_create_count_zero(void);
+extern int test_index_create_null(void);
+extern int test_index_create_unspec_family(void);
+extern int test_index_create_mixed_family(void);
+extern int test_index_create_count_overflow(void);
+extern int test_index_destroy_null_safe(void);
+extern int test_index_lookup_null_matches_nonzero_count(void);
+extern int test_index_lookup_count_zero(void);
+
 int tests_run = 0;
 int tests_passed = 0;
 
@@ -326,6 +339,17 @@ main(void)
 	    test_classify_boundary_first_last);
 	RUN("test_classify_null", test_classify_null);
 	RUN("test_classify_unspec", test_classify_unspec);
+
+	RUN("test_index_create_count_zero", test_index_create_count_zero);
+	RUN("test_index_create_null", test_index_create_null);
+	RUN("test_index_create_unspec_family", test_index_create_unspec_family);
+	RUN("test_index_create_mixed_family", test_index_create_mixed_family);
+	RUN("test_index_create_count_overflow",
+	    test_index_create_count_overflow);
+	RUN("test_index_destroy_null_safe", test_index_destroy_null_safe);
+	RUN("test_index_lookup_null_matches_nonzero_count",
+	    test_index_lookup_null_matches_nonzero_count);
+	RUN("test_index_lookup_count_zero", test_index_lookup_count_zero);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

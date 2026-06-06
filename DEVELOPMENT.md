@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 5 -- Address Classification (COMPLETE)
-**Next Task**: Phase 6 -- Patricia Trie Index
+**Current Phase**: Phase 6 -- Patricia Trie Index (IN PROGRESS)
+**Next Task**: Phase 6.2 -- Basic trie construction
 
 ### Phase Summary
 
@@ -14,7 +14,7 @@
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
-| 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
+| 6 | Patricia Trie Index | IN PROGRESS | 8/8 | LC-trie build and lookup; types defined; API declared; stubs in place |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
@@ -714,7 +714,7 @@ the prefix array using the Phase 4 radix sort engine.)
 
 ### Tasks
 
-**6.1 -- `cidr_lctrie_node_t` and `cidr_index_t`**
+**6.1 -- `cidr_lctrie_node_t` and `cidr_index_t`** ✓ DONE
 - Define `cidr_lctrie_node_t` in `src/cidr_internal.h` per ARCHITECTURE.md §6.3:
   `uint32_t base`, `uint32_t prefix_idx`, `uint8_t branch`, `uint8_t skip`,
   `uint8_t pad[2]` -- total 12 bytes, 4-byte alignment
@@ -723,6 +723,12 @@ the prefix array using the Phase 4 radix sort engine.)
 - Define `cidr_index_t` as an opaque struct in `src/cidr_internal.h`:
   pointer to node array, node count, pointer to copied prefix array,
   prefix count, address family
+- Add public API function declarations (`cidr_index_create`,
+  `cidr_index_destroy`, `cidr_index_lookup`) to `include/libcidr.h`
+  with full doc comment blocks
+- Add function stubs with input validation in `src/cidr_index.c`
+- Create `tests/test_index.c` with 8 validation tests for error paths
+- Update `tests/run_tests.c` and `Makefile`
 
 **6.2 -- Basic trie construction**
 - Implement a basic Patricia trie (path-compressed binary trie) builder:
