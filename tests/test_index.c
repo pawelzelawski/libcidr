@@ -12,6 +12,7 @@
  * ARCHITECTURE.md §6.3 for interior node prefix semantics.
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "../include/libcidr.h"
@@ -82,16 +83,47 @@ test_index_destroy_null_safe(void)
 	return 0;
 }
 
+/*
+ * test_index_lookup_null_index - NULL index pointer returns CIDR_ERR_INVAL.
+ */
+int
+test_index_lookup_null_index(void)
+{
+	if (cidr_index_lookup(NULL, NULL, 0, NULL, NULL) != CIDR_ERR_INVAL)
+		return 1;
+	return 0;
+}
+
+/*
+ * test_index_lookup_null_matches_nonzero_count - NULL matches with count > 0
+ * returns CIDR_ERR_INVAL. Uses a real valid index to reach the check.
+ *
+ * See ARCHITECTURE.md §6.2: "If count > 0 and matches is NULL, returns
+ * CIDR_ERR_INVAL."
+ */
 int
 test_index_lookup_null_matches_nonzero_count(void)
 {
+	cidr_prefix_t prefix;
+	cidr_addr_t addr;
 	cidr_index_t *index = NULL;
 
-	if (cidr_index_lookup(NULL, NULL, 0, NULL, NULL) != CIDR_ERR_INVAL)
+	if (cidr_prefix_parse("10.0.0.0/8", &prefix) != CIDR_OK)
 		return 1;
-	if (cidr_index_lookup((const cidr_index_t *)&index, NULL, 1, NULL,
-	                      NULL) != CIDR_ERR_INVAL)
+	if (cidr_index_create(&prefix, 1, &index) != CIDR_OK)
 		return 1;
+	if (cidr_addr_parse("10.0.0.1", &addr) != CIDR_OK) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+
+	/* matches == NULL with count > 0 must return CIDR_ERR_INVAL. */
+	if (cidr_index_lookup(index, &addr, 1, NULL, NULL) != CIDR_ERR_INVAL) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+
+	cidr_index_destroy(index);
 	return 0;
 }
 
@@ -608,4 +640,128 @@ test_index_lookup_family_mismatch(void)
 
 	cidr_index_destroy(index);
 	return 0;
+}
+
+/*
+ * test_index_routing_table_scale - 100,000 /24 prefixes; index lookup
+ * results verified against cidr_bulk_contains with a PFXLEN_DESC-sorted
+ * table. Spot-checks 1000 addresses (every 100th prefix) for correct
+ * original-index and matching prefix value.
+ *
+ * See DEVELOPMENT.md Phase 6 Tests.
+ */
+int
+test_index_routing_table_scale(void)
+{
+	const size_t prefix_count = 100000;
+	const size_t spot_count = 1000;
+	cidr_prefix_t *prefixes = NULL;
+	cidr_prefix_t *sorted = NULL;
+	cidr_addr_t *addrs = NULL;
+	ssize_t *idx_matches = NULL;
+	ssize_t *bulk_matches = NULL;
+	cidr_index_t *index = NULL;
+	size_t n, k;
+	int rc = 1;
+
+	prefixes = malloc(prefix_count * sizeof(cidr_prefix_t));
+	sorted = malloc(prefix_count * sizeof(cidr_prefix_t));
+	addrs = malloc(spot_count * sizeof(cidr_addr_t));
+	idx_matches = malloc(spot_count * sizeof(ssize_t));
+	bulk_matches = malloc(spot_count * sizeof(ssize_t));
+	if (prefixes == NULL || sorted == NULL || addrs == NULL ||
+	    idx_matches == NULL || bulk_matches == NULL)
+		goto done;
+
+	/*
+	 * Generate 100,000 unique non-overlapping /24 prefixes.
+	 * Prefix n: (n>>16).((n>>8)&0xff).(n&0xff).0/24
+	 * Range: 0.0.0.0/24 through 1.134.159.0/24 (100k entries).
+	 * All are host-bits-zero by construction.
+	 */
+	for (n = 0; n < prefix_count; n++) {
+		prefixes[n].addr.family = CIDR_AF_INET;
+		prefixes[n].addr.addr.v4[0] = (uint8_t)((n >> 16) & 0xff);
+		prefixes[n].addr.addr.v4[1] = (uint8_t)((n >> 8) & 0xff);
+		prefixes[n].addr.addr.v4[2] = (uint8_t)(n & 0xff);
+		prefixes[n].addr.addr.v4[3] = 0;
+		prefixes[n].pfxlen = 24;
+	}
+
+	if (cidr_index_create(prefixes, prefix_count, &index) != CIDR_OK)
+		goto done;
+
+	/*
+	 * Build a PFXLEN_DESC-sorted copy for cidr_bulk_contains LPM.
+	 * All prefixes are /24 so PFXLEN_DESC reduces to NETWORK_ASC.
+	 * cidr_bulk_sort restores addr.family on return (internal tags
+	 * are cleaned up), so the sorted array is safe for bulk_contains.
+	 */
+	memcpy(sorted, prefixes, prefix_count * sizeof(cidr_prefix_t));
+	if (cidr_bulk_sort(sorted, prefix_count, CIDR_SORT_PFXLEN_DESC) !=
+	    CIDR_OK)
+		goto done;
+
+	/*
+	 * Construct 1000 spot-check addresses: host .1 inside every 100th
+	 * prefix (n = 0, 100, 200, ..., 99900).
+	 */
+	for (k = 0; k < spot_count; k++) {
+		n = k * (prefix_count / spot_count);
+		addrs[k].family = CIDR_AF_INET;
+		addrs[k].addr.v4[0] = (uint8_t)((n >> 16) & 0xff);
+		addrs[k].addr.v4[1] = (uint8_t)((n >> 8) & 0xff);
+		addrs[k].addr.v4[2] = (uint8_t)(n & 0xff);
+		addrs[k].addr.v4[3] = 1;
+	}
+
+	if (cidr_index_lookup(index, addrs, spot_count, idx_matches, NULL) !=
+	    CIDR_OK)
+		goto done;
+	if (cidr_bulk_contains(addrs, spot_count, sorted, prefix_count,
+	                       bulk_matches, NULL) != CIDR_OK)
+		goto done;
+
+	/*
+	 * Verify each spot-check address:
+	 * 1. Index must return original prefix index n = k * 100.
+	 * 2. Bulk must find a match (prefixes are non-overlapping).
+	 * 3. Both must identify the same prefix by address bytes and pfxlen.
+	 */
+	for (k = 0; k < spot_count; k++) {
+		const cidr_prefix_t *op, *sp;
+
+		n = k * (prefix_count / spot_count);
+		if (idx_matches[k] != (ssize_t)n)
+			goto done;
+		if (bulk_matches[k] == -1)
+			goto done;
+		op = &prefixes[idx_matches[k]];
+		sp = &sorted[bulk_matches[k]];
+		if (op->pfxlen != sp->pfxlen)
+			goto done;
+		if (memcmp(&op->addr.addr, &sp->addr.addr, 4) != 0)
+			goto done;
+	}
+
+	/* Address outside all generated prefixes must return -1. */
+	addrs[0].family = CIDR_AF_INET;
+	addrs[0].addr.v4[0] = 255;
+	addrs[0].addr.v4[1] = 255;
+	addrs[0].addr.v4[2] = 255;
+	addrs[0].addr.v4[3] = 1;
+	if (cidr_index_lookup(index, addrs, 1, idx_matches, NULL) != CIDR_OK)
+		goto done;
+	if (idx_matches[0] != -1)
+		goto done;
+
+	rc = 0;
+done:
+	cidr_index_destroy(index);
+	free(prefixes);
+	free(sorted);
+	free(addrs);
+	free(idx_matches);
+	free(bulk_matches);
+	return rc;
 }

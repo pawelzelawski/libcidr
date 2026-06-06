@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 6 -- Patricia Trie Index (IN PROGRESS)
-**Next Task**: Phase 6.2 -- Basic trie construction
+**Next Task**: Phase 6.3 -- Level compression (LC-trie DP)
 
 ### Phase Summary
 
@@ -14,7 +14,7 @@
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
-| 6 | Patricia Trie Index | IN PROGRESS | 8/8 | LC-trie build and lookup; types defined; API declared; stubs in place |
+| 6 | Patricia Trie Index | IN PROGRESS | 19/19 | Phase 6.2 complete: binary Patricia trie, full lookup, duplicate resolution |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
@@ -730,7 +730,7 @@ the prefix array using the Phase 4 radix sort engine.)
 - Create `tests/test_index.c` with 8 validation tests for error paths
 - Update `tests/run_tests.c` and `Makefile`
 
-**6.2 -- Basic trie construction**
+**6.2 -- Basic trie construction** ✓ DONE
 - Implement a basic Patricia trie (path-compressed binary trie) builder:
   each node has at most two children; `skip` encodes how many bits to
   advance past without branching

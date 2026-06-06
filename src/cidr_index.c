@@ -113,6 +113,8 @@ trie_prefix_matches(const cidr_prefix_t *pfx, const cidr_addr_t *addr,
 	uint8_t pfxlen;
 	size_t full_bytes, bit_rem;
 
+	(void)addr_len;
+
 	pfxlen = pfx->pfxlen;
 	pfx_bytes = (const uint8_t *)&pfx->addr.addr;
 	addr_bytes = (const uint8_t *)&addr->addr;
@@ -147,8 +149,9 @@ trie_prefix_matches(const cidr_prefix_t *pfx, const cidr_addr_t *addr,
  * array. All prefixes in this range share the same first (bit_pos) bits.
  * The `inherited` parameter is the best matching prefix from ancestors
  * (UINT32_MAX if none). The function writes the subtree root node at
- * `nodes[write_at]` and returns the total number of nodes written
- * (including the root and all descendants).
+ * `nodes[write_at]`. Child roots for a branch node are reserved at
+ * contiguous indices `nodes[base]` and `nodes[base + 1]`, with deeper
+ * descendants allocated after those root slots via `next_free`.
  *
  * Algorithm: find the first bit position >= bit_pos where either a
  * prefix ends or the remaining prefixes diverge. Create a node at that
@@ -162,9 +165,9 @@ trie_prefix_matches(const cidr_prefix_t *pfx, const cidr_addr_t *addr,
  * addr_len:    address byte width (4 or 16)
  * nodes:       pre-allocated node array
  * write_at:    index in nodes where this subtree's root is placed
+ * next_free:   next unallocated node slot; updated as descendants are
+ *              reserved during recursive construction
  * inherited:   best prefix_idx from ancestor chain (UINT32_MAX if none)
- *
- * Returns the total number of nodes in this subtree (including root).
  *
  * NOTE: prefix_idx stored in each node is the SORTED position (index
  * into the sorted prefix array), NOT the original caller index. The
@@ -172,16 +175,16 @@ trie_prefix_matches(const cidr_prefix_t *pfx, const cidr_addr_t *addr,
  *
  * See ARCHITECTURE.md §6.3 for node layout and traversal semantics.
  */
-static uint32_t
+static void
 trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
                    int bit_pos, int key_bits, size_t addr_len,
                    cidr_lctrie_node_t *nodes, uint32_t write_at,
-                   uint32_t inherited)
+                   uint32_t *next_free, uint32_t inherited)
 {
-	uint32_t best_prefix_idx, left_size, right_size;
+	uint32_t best_prefix_idx;
 	bool has_extending, diverges;
-	int split_bit, skip, i;
-	size_t ext_start, pivot;
+	int split_bit, skip;
+	size_t ext_start, pivot, i;
 
 	/*
 	 * No prefixes in this range: create a dead leaf.
@@ -194,7 +197,7 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		nodes[write_at].base = 0;
 		nodes[write_at].pad[0] = 0;
 		nodes[write_at].pad[1] = 0;
-		return 1;
+		return;
 	}
 
 	/*
@@ -217,7 +220,7 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		bool ends_here = false;
 		uint32_t end_idx = UINT32_MAX;
 
-		for (i = (int)start; i < (int)end; i++) {
+		for (i = start; i < end; i++) {
 			if ((int)sorted[i].pfxlen == p) {
 				if (!ends_here || (uint32_t)i < end_idx) {
 					ends_here = true;
@@ -230,7 +233,7 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		{
 			int first_val = -1;
 
-			for (i = (int)start; i < (int)end; i++) {
+			for (i = start; i < end; i++) {
 				if ((int)sorted[i].pfxlen <= p)
 					continue;
 				if (first_val < 0) {
@@ -267,7 +270,7 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 	    !diverges) {
 		uint32_t min_idx = UINT32_MAX;
 
-		for (i = (int)start; i < (int)end; i++) {
+		for (i = start; i < end; i++) {
 			if ((uint32_t)i < min_idx)
 				min_idx = (uint32_t)i;
 		}
@@ -279,7 +282,7 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		nodes[write_at].base = 0;
 		nodes[write_at].pad[0] = 0;
 		nodes[write_at].pad[1] = 0;
-		return 1;
+		return;
 	}
 
 	/*
@@ -292,11 +295,11 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 	 */
 	has_extending = false;
 	ext_start = end;
-	for (i = (int)start; i < (int)end; i++) {
+	for (i = start; i < end; i++) {
 		if ((int)sorted[i].pfxlen > split_bit) {
 			has_extending = true;
-			if ((size_t)i < ext_start)
-				ext_start = (size_t)i;
+			if (i < ext_start)
+				ext_start = i;
 			break;
 		}
 	}
@@ -317,15 +320,20 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 
 	if (!has_extending) {
 		nodes[write_at].base = 0;
-		return 1;
+		return;
 	}
 
 	/*
-	 * Interior node: build 2 children starting at write_at + 1.
+	 * Interior node: reserve 2 child-root slots contiguously, then
+	 * place descendants after them.
+	 *
 	 * See ARCHITECTURE.md §6.3: for branch=1, node has 2^1=2 children
-	 * at nodes[base] and nodes[base+1].
+	 * at nodes[base] and nodes[base+1]. The traversal indexes directly
+	 * into those root slots, so deeper descendants must not displace the
+	 * right child root.
 	 */
-	nodes[write_at].base = write_at + 1;
+	nodes[write_at].base = *next_free;
+	*next_free += 2;
 
 	/*
 	 * Partition extending prefixes by bit value at split_bit.
@@ -337,11 +345,11 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 	 * this node (stored in prefix_idx or inherited).
 	 */
 	pivot = end;
-	for (i = (int)ext_start; i < (int)end; i++) {
+	for (i = ext_start; i < end; i++) {
 		if ((int)sorted[i].pfxlen <= split_bit)
 			continue;
 		if (trie_addr_bit(&sorted[i].addr, split_bit, addr_len) == 1) {
-			pivot = (size_t)i;
+			pivot = i;
 			break;
 		}
 	}
@@ -357,21 +365,13 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		                      ? best_prefix_idx
 		                      : inherited;
 
-		/* Left child: prefixes with bit split_bit == 0 */
-		left_size = trie_subtree_build(
+		trie_subtree_build(
 		    sorted, ext_start, pivot, split_bit + 1, key_bits, addr_len,
-		    nodes, write_at + 1, child_inherited);
-
-		/*
-		 * Right child: prefixes with bit split_bit == 1.
-		 * Position is right after the left child's subtree.
-		 */
-		right_size = trie_subtree_build(
-		    sorted, pivot, end, split_bit + 1, key_bits, addr_len,
-		    nodes, write_at + 1 + left_size, child_inherited);
+		    nodes, nodes[write_at].base, next_free, child_inherited);
+		trie_subtree_build(sorted, pivot, end, split_bit + 1, key_bits,
+		                   addr_len, nodes, nodes[write_at].base + 1,
+		                   next_free, child_inherited);
 	}
-
-	return 1 + left_size + right_size;
 }
 
 /*
@@ -573,8 +573,9 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 	 * array), not original caller indices. The orig_map array
 	 * translates sorted positions back to original indices.
 	 */
-	node_count = trie_subtree_build(copy, 0, count, 0, key_bits, addr_len,
-	                                nodes, 0, UINT32_MAX);
+	node_count = 1;
+	trie_subtree_build(copy, 0, count, 0, key_bits, addr_len, nodes, 0,
+	                   &node_count, UINT32_MAX);
 
 	/*
 	 * Populate the index struct. Ownership of nodes, copy, orig_map,
@@ -673,8 +674,10 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 		 * node->base + extracted where extracted < 2^branch.
 		 * For branch=0 traversal stops. For branch=1 extracted
 		 * is 0 or 1. The node array was allocated for all valid
-		 * paths during construction. Children are built
-		 * immediately after their parent, so indices are valid.
+		 * paths during construction. Each branch node reserves
+		 * contiguous child-root slots at nodes[base] and
+		 * nodes[base + 1] before recursing, so the extracted
+		 * index always lands on a valid child root.
 		 *
 		 * See ARCHITECTURE.md §6.3.
 		 */
@@ -710,8 +713,10 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 				break;
 
 			/*
-			 * Extract branch bits from the address.
-			 * For branch=1, test one bit.
+			 * Extract branch bits from the address, then advance
+			 * bit_pos by the CURRENT node's branch count before
+			 * updating node. After the pointer update node->branch
+			 * refers to the child, not the current node.
 			 */
 			extracted = 0;
 			for (int b = 0; b < node->branch; b++)
@@ -720,8 +725,8 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 				    trie_addr_bit(&addrs[i], bit_pos + b,
 				                  addr_len);
 
-			node = &index->nodes[node->base + (uint32_t)extracted];
 			bit_pos += node->branch;
+			node = &index->nodes[node->base + (uint32_t)extracted];
 		}
 
 		matches[i] = best;

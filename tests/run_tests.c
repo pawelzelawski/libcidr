@@ -155,6 +155,7 @@ extern int test_index_create_unspec_family(void);
 extern int test_index_create_mixed_family(void);
 extern int test_index_create_count_overflow(void);
 extern int test_index_destroy_null_safe(void);
+extern int test_index_lookup_null_index(void);
 extern int test_index_lookup_null_matches_nonzero_count(void);
 extern int test_index_lookup_count_zero(void);
 extern int test_index_basic_lookup(void);
@@ -166,6 +167,7 @@ extern int test_index_no_match(void);
 extern int test_index_memory_clean(void);
 extern int test_index_lpm_matches_sorted_bulk(void);
 extern int test_index_lookup_family_mismatch(void);
+extern int test_index_routing_table_scale(void);
 
 int tests_run = 0;
 int tests_passed = 0;
@@ -356,6 +358,7 @@ main(void)
 	RUN("test_index_create_count_overflow",
 	    test_index_create_count_overflow);
 	RUN("test_index_destroy_null_safe", test_index_destroy_null_safe);
+	RUN("test_index_lookup_null_index", test_index_lookup_null_index);
 	RUN("test_index_lookup_null_matches_nonzero_count",
 	    test_index_lookup_null_matches_nonzero_count);
 	RUN("test_index_lookup_count_zero", test_index_lookup_count_zero);
@@ -371,6 +374,7 @@ main(void)
 	    test_index_lpm_matches_sorted_bulk);
 	RUN("test_index_lookup_family_mismatch",
 	    test_index_lookup_family_mismatch);
+	RUN("test_index_routing_table_scale", test_index_routing_table_scale);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;
