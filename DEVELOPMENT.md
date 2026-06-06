@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 7 -- Python Binding Layer (IN PROGRESS)
-**Next Task**: Phase 7.3 -- IPv4Network and IPv6Network types
+**Next Task**: Phase 7.5 -- Bulk entry points
 
 ### Phase Summary
 
@@ -15,7 +15,7 @@
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
-| 7 | Python Binding Layer | IN PROGRESS | 180/180 | CPython stable ABI extension |
+| 7 | Python Binding Layer | IN PROGRESS | 185/185 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
 ### Quality Milestones
@@ -894,7 +894,7 @@ no partial binding makes sense before all C components are tested and stable.
 - Implement protocol methods: `__str__`, `__repr__`, `__eq__`, `__hash__`,
   `__lt__`
 
-**7.4 -- Subnet iterator type**
+**7.4 -- Subnet iterator type** ✓ DONE
 - Define `SubnetIterator` C struct embedding `cidr_subnet_iter_t` by value
 - Implement `__iter__` returning `self`
 - Implement `__next__`: call `cidr_subnet_iter_next()`; on `CIDR_ERR_DONE`,

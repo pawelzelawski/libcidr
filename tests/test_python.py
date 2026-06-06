@@ -919,6 +919,53 @@ class TestNetworkMethods(unittest.TestCase):
         for subnet in net.subnets(prefixlen=25):
             self.assertIsInstance(subnet, libcidr.IPv4Network)
 
+    def test_subnets_invalid_prefixlen(self):
+        """target prefixlen <= parent prefixlen raises PrefixLengthError."""
+        net = libcidr.IPv4Network('10.0.0.0/8')
+        with self.assertRaises(libcidr.PrefixLengthError):
+            net.subnets(prefixlen=8)
+        with self.assertRaises(libcidr.PrefixLengthError):
+            net.subnets(prefixlen=4)
+
+    def test_subnets_iterator_protocol(self):
+        """__iter__ returns self; iterator can be used in iter() protocol."""
+        net = libcidr.IPv4Network('10.0.0.0/30')
+        it = net.subnets(prefixlen=32)
+        it2 = iter(it)
+        self.assertIs(it, it2)
+        subnets = list(it)
+        self.assertEqual(len(subnets), 4)
+
+    def test_subnets_early_termination(self):
+        """break from loop is safe; no crash after partial iteration."""
+        net = libcidr.IPv4Network('10.0.0.0/24')
+        count = 0
+        for subnet in net.subnets(prefixlen=28):
+            count += 1
+            if count >= 3:
+                break
+        self.assertEqual(count, 3)
+
+    def test_subnets_ascending_order(self):
+        """subnets are yielded in ascending network address order."""
+        net = libcidr.IPv4Network('10.0.0.0/30')
+        prev = None
+        for subnet in net.subnets(prefixlen=32):
+            if prev is not None:
+                self.assertGreater(subnet.network_address,
+                                   prev.network_address)
+            prev = subnet
+
+    def test_subnets_from_ipaddress_constructed(self):
+        """subnets() works on network constructed from ipaddress object."""
+        import ipaddress
+        src = ipaddress.IPv4Network('192.168.0.0/24')
+        net = libcidr.IPv4Network(src)
+        subnets = list(net.subnets(prefixlen=25))
+        self.assertEqual(len(subnets), 2)
+        self.assertEqual(str(subnets[0]), '192.168.0.0/25')
+        self.assertEqual(str(subnets[1]), '192.168.0.128/25')
+
     def test_contains_string_v4(self):
         net = libcidr.IPv4Network('10.0.0.0/8')
         self.assertTrue(net.contains('10.0.0.1'))
