@@ -33,7 +33,7 @@
 | M9 | RFC conformance verified | PENDING |
 | M10 | bulk_aggregate matches ipaddress.collapse_addresses | PENDING |
 | M11 | LC-trie LPM semantics verified | CONFIRMED |
-| M12 | Python binding all tests pass | PENDING |
+| M12 | Python binding all tests pass | COMPLETE |
 | M13 | Benchmark baselines recorded | PENDING |
 
 ---

@@ -19,7 +19,6 @@
 #define Py_LIMITED_API 0x030B0000
 #include <Python.h>
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -146,17 +145,24 @@ static PyTypeObject *subnetiterator_type = NULL;
 static int
 ipv6_format_exploded(const cidr_addr_t *addr, char *buf, size_t len)
 {
+	static const char hex[] = "0123456789abcdef";
 	const uint8_t *v6 = addr->addr.v6;
+	char *p = buf;
 
-	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-	int n = snprintf(buf, len,
-	                 "%02x%02x:%02x%02x:%02x%02x:%02x%02x:"
-	                 "%02x%02x:%02x%02x:%02x%02x:%02x%02x",
-	                 v6[0], v6[1], v6[2], v6[3], v6[4], v6[5], v6[6], v6[7],
-	                 v6[8], v6[9], v6[10], v6[11], v6[12], v6[13], v6[14],
-	                 v6[15]);
-	if (n < 0 || (size_t)n >= len)
+	if (len < 40)
 		return -1;
+	for (size_t g = 0; g < 8; g++) {
+		uint8_t hi = v6[g * 2];
+		uint8_t lo = v6[g * 2 + 1];
+
+		*p++ = hex[hi >> 4];
+		*p++ = hex[hi & 0x0f];
+		*p++ = hex[lo >> 4];
+		*p++ = hex[lo & 0x0f];
+		if (g < 7)
+			*p++ = ':';
+	}
+	*p = '\0';
 	return 0;
 }
 
@@ -862,7 +868,7 @@ ipv4address_hash(PyObject *self)
 	h = ((h << 5) + h) + (Py_hash_t)a->addr.family;
 	for (int i = 0; i < 4; i++)
 		h = ((h << 5) + h) + (Py_hash_t)v4[i];
-	return h;
+	return h == -1 ? -2 : h;
 }
 
 static Py_hash_t
@@ -879,7 +885,7 @@ ipv6address_hash(PyObject *self)
 	h = ((h << 5) + h) + (Py_hash_t)a->addr.family;
 	for (int i = 0; i < 16; i++)
 		h = ((h << 5) + h) + (Py_hash_t)v6[i];
-	return h;
+	return h == -1 ? -2 : h;
 }
 
 /* -------------------------------------------------------------------
@@ -1085,13 +1091,13 @@ static PyType_Slot ipv6address_slots[] = {
     {Py_tp_doc, (void *)"IPv6 address representation."},
     {0, NULL}};
 
-static PyType_Spec ipv4address_spec = {"libcidr.IPv4Address",
-                                       sizeof(IPv4Address), 0,
-                                       Py_TPFLAGS_DEFAULT, ipv4address_slots};
+static PyType_Spec ipv4address_spec = {
+    "libcidr.IPv4Address", sizeof(IPv4Address), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, ipv4address_slots};
 
-static PyType_Spec ipv6address_spec = {"libcidr.IPv6Address",
-                                       sizeof(IPv6Address), 0,
-                                       Py_TPFLAGS_DEFAULT, ipv6address_slots};
+static PyType_Spec ipv6address_spec = {
+    "libcidr.IPv6Address", sizeof(IPv6Address), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, ipv6address_slots};
 
 /* ===================================================================
  * IPv4Network and IPv6Network types.
@@ -1388,10 +1394,8 @@ prefix_extract_ipaddress(PyObject *obj, cidr_prefix_t *out,
 	/* Get packed bytes from the network address object. */
 	packed = PyObject_GetAttrString(net_addr, "packed");
 	Py_DECREF(net_addr);
-	if (packed == NULL) {
-		Py_DECREF(packed);
+	if (packed == NULL)
 		return -1;
-	}
 
 	if (!PyBytes_Check(packed)) {
 		Py_DECREF(packed);
@@ -2097,7 +2101,7 @@ ipv4network_hash(PyObject *self)
 	for (int i = 0; i < 4; i++)
 		h = ((h << 5) + h) + (Py_hash_t)v4[i];
 	h = ((h << 5) + h) + (Py_hash_t)n->prefix.pfxlen;
-	return h;
+	return h == -1 ? -2 : h;
 }
 
 static Py_hash_t
@@ -2115,7 +2119,7 @@ ipv6network_hash(PyObject *self)
 	for (int i = 0; i < 16; i++)
 		h = ((h << 5) + h) + (Py_hash_t)v6[i];
 	h = ((h << 5) + h) + (Py_hash_t)n->prefix.pfxlen;
-	return h;
+	return h == -1 ? -2 : h;
 }
 
 /*
@@ -2344,13 +2348,13 @@ static PyType_Slot ipv6network_slots[] = {
     {Py_tp_doc, (void *)"IPv6 network (CIDR prefix)."},
     {0, NULL}};
 
-static PyType_Spec ipv4network_spec = {"libcidr.IPv4Network",
-                                       sizeof(IPv4Network), 0,
-                                       Py_TPFLAGS_DEFAULT, ipv4network_slots};
+static PyType_Spec ipv4network_spec = {
+    "libcidr.IPv4Network", sizeof(IPv4Network), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, ipv4network_slots};
 
-static PyType_Spec ipv6network_spec = {"libcidr.IPv6Network",
-                                       sizeof(IPv6Network), 0,
-                                       Py_TPFLAGS_DEFAULT, ipv6network_slots};
+static PyType_Spec ipv6network_spec = {
+    "libcidr.IPv6Network", sizeof(IPv6Network), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, ipv6network_slots};
 
 /* ===================================================================
  * SubnetIterator type.
@@ -2424,8 +2428,8 @@ static PyType_Slot subnetiterator_slots[] = {
     {0, NULL}};
 
 static PyType_Spec subnetiterator_spec = {
-    "libcidr.SubnetIterator", sizeof(SubnetIterator), 0, Py_TPFLAGS_DEFAULT,
-    subnetiterator_slots};
+    "libcidr.SubnetIterator", sizeof(SubnetIterator), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, subnetiterator_slots};
 
 /* ===================================================================
  * Bulk entry points.
@@ -3280,8 +3284,10 @@ PyInit_libcidr(void)
 	    PyExc_Exception, NULL);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "CIDRError", exc) < 0)
+	if (PyModule_AddObject(m, "CIDRError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_CIDRError = exc;
 	Py_INCREF(libcidr_CIDRError);
 
@@ -3297,8 +3303,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "ParseError", exc) < 0)
+	if (PyModule_AddObject(m, "ParseError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_ParseError = exc;
 	Py_INCREF(libcidr_ParseError);
 
@@ -3316,8 +3324,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "HostBitsError", exc) < 0)
+	if (PyModule_AddObject(m, "HostBitsError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_HostBitsError = exc;
 	Py_INCREF(libcidr_HostBitsError);
 
@@ -3336,8 +3346,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "PrefixLengthError", exc) < 0)
+	if (PyModule_AddObject(m, "PrefixLengthError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_PrefixLengthError = exc;
 	Py_INCREF(libcidr_PrefixLengthError);
 
@@ -3356,8 +3368,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "InvalidArgumentError", exc) < 0)
+	if (PyModule_AddObject(m, "InvalidArgumentError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_InvalidArgumentError = exc;
 	Py_INCREF(libcidr_InvalidArgumentError);
 
@@ -3378,8 +3392,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "FamilyError", exc) < 0)
+	if (PyModule_AddObject(m, "FamilyError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_FamilyError = exc;
 	Py_INCREF(libcidr_FamilyError);
 
@@ -3400,8 +3416,10 @@ PyInit_libcidr(void)
 	Py_DECREF(bases);
 	if (exc == NULL)
 		goto error;
-	if (PyModule_AddObject(m, "AddressOverflowError", exc) < 0)
+	if (PyModule_AddObject(m, "AddressOverflowError", exc) < 0) {
+		Py_DECREF(exc);
 		goto error;
+	}
 	libcidr_AddressOverflowError = exc;
 	Py_INCREF(libcidr_AddressOverflowError);
 
@@ -3564,6 +3582,20 @@ PyInit_libcidr(void)
 	return m;
 
 error:
+	Py_XDECREF(libcidr_CIDRError);
+	libcidr_CIDRError = NULL;
+	Py_XDECREF(libcidr_ParseError);
+	libcidr_ParseError = NULL;
+	Py_XDECREF(libcidr_HostBitsError);
+	libcidr_HostBitsError = NULL;
+	Py_XDECREF(libcidr_PrefixLengthError);
+	libcidr_PrefixLengthError = NULL;
+	Py_XDECREF(libcidr_InvalidArgumentError);
+	libcidr_InvalidArgumentError = NULL;
+	Py_XDECREF(libcidr_FamilyError);
+	libcidr_FamilyError = NULL;
+	Py_XDECREF(libcidr_AddressOverflowError);
+	libcidr_AddressOverflowError = NULL;
 	Py_XDECREF((PyObject *)ipv4address_type);
 	ipv4address_type = NULL;
 	Py_XDECREF((PyObject *)ipv6address_type);
