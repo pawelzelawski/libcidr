@@ -17,20 +17,7 @@ _Static_assert(
     sizeof(cidr_prefix_t) == 24,
     "cidr_prefix_t size changed -- check addr + pfxlen + trailing padding");
 
-/*
- * cidr_lctrie_node_t - Level-Compressed trie node.
- *
- * Each node in the array-packed LC-trie. Path compression (skip) collapses
- * single-child chains; level compression (branch) enables multi-bit branching.
- * See ARCHITECTURE.md §6.3 for the node layout specification.
- *
- * base:       index of first child in the contiguous node array; undefined
- *             when branch == 0
- * prefix_idx: index into the copied prefix array, or UINT32_MAX for no prefix
- * branch:     branching factor: the node has 2^branch children; 0 = leaf
- * skip:       number of bits to advance past without branching
- * pad[2]:     alignment padding to reach 12 bytes
- */
+/* LC-trie node. See ARCHITECTURE.md §6.3 for field semantics. */
 typedef struct {
 	uint32_t base;
 	uint32_t prefix_idx;
@@ -43,24 +30,8 @@ _Static_assert(
     sizeof(cidr_lctrie_node_t) == 12,
     "cidr_lctrie_node_t size changed -- update ARCHITECTURE.md §6.3");
 
-/*
- * cidr_index - Patricia trie index (opaque to callers).
- *
- * The full struct definition is visible only internally. Callers see the
- * opaque typedef struct cidr_index cidr_index_t declared in libcidr.h.
- * See ARCHITECTURE.md §6 for the index specification.
- *
- * nodes:         contiguous LC-trie node array (heap-allocated, owned)
- * node_count:    number of nodes in nodes
- * prefixes:      copy of the caller-provided prefix array (heap-allocated,
- *                owned); caller may free their array after index_create
- *                returns. Sorted by CIDR_SORT_NETWORK_ASC.
- * prefix_count:  number of prefixes
- * orig_indices:  mapping sorted_position -> original caller index
- *                (heap-allocated, owned); length == prefix_count
- * family:        CIDR_AF_INET or CIDR_AF_INET6 -- all prefixes share one
- *                family; mixed-family indices are not allowed
- */
+/* Patricia trie index (opaque to callers).
+ * See ARCHITECTURE.md §6 for full specification. */
 struct cidr_index {
 	cidr_lctrie_node_t *nodes;
 	uint32_t node_count;
@@ -71,22 +42,10 @@ struct cidr_index {
 };
 
 /*
- * radix_sort_prefixes - in-place MSD radix sort for prefix arrays.
- *
- * Sorts the prefix array in place using the shared in-place MSD radix sort
- * engine. Used internally by cidr_bulk_sort() and cidr_index_create().
- * No allocation occurs -- all workspace is on the stack.
- *
- * prefixes: caller-provided prefix array; modified in place
- * count:    number of entries in prefixes (must be > 0)
- * order:    CIDR_SORT_NETWORK_ASC or CIDR_SORT_PFXLEN_DESC
- *
- * The caller must ensure that all prefixes have the same valid address
- * family (CIDR_AF_INET or CIDR_AF_INET6) and that count > 0. No parameter
- * validation is performed by this function -- callers are responsible for
- * checking preconditions.
- *
- * See ARCHITECTURE.md §5.4, §5.5.
+ * radix_sort_prefixes -- in-place MSD radix sort shared by cidr_bulk_sort()
+ * and cidr_index_create(). No allocation; all workspace is on the stack.
+ * Caller must ensure count > 0 and all prefixes share one valid family.
+ * No parameter validation. See ARCHITECTURE.md §5.4.
  */
 void radix_sort_prefixes(cidr_prefix_t *prefixes, size_t count,
                          cidr_sort_order_t order, cidr_family_t family);

@@ -248,24 +248,13 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 	if (*src == '\0')
 		return CIDR_ERR_PARSE;
 
-	/*
-	 * Find the last colon in the string to test for mixed
-	 * (IPv4-mapped) notation. If the suffix after the last
-	 * colon looks like a dotted-decimal IPv4 address, try
-	 * the mixed-notation parse path.
-	 * See ARCHITECTURE.md §4.1.2.
-	 */
+	/* Find last colon; test suffix for mixed IPv4 notation. */
 	for (p = src; *p != '\0'; p++) {
 		if (*p == ':')
 			last_colon = p;
 	}
 
-	/*
-	 * If the suffix after the last colon could be an IPv4
-	 * address, attempt mixed-notation parse. This covers
-	 * ::ffff:192.0.2.1 (accepted) and ::192.0.2.1 (rejected
-	 * by the prefix check below).
-	 */
+	/* Mixed-notation path: hex prefix followed by dotted-decimal tail. */
 	if (last_colon != NULL && is_mixed_suffix(last_colon + 1)) {
 		uint8_t ipv4_octets[4];
 		const char *ipv4_src = last_colon + 1;
@@ -275,16 +264,9 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 
 		const char *hex_end;
 
-		/*
-		 * The hex part is everything before the last colon.
-		 * If the last colon is the second colon of :: (as in
-		 * ::192.0.2.1), the hex part is just ":" (one colon).
-		 * We handle this degeneracy below.
-		 */
 		hex_end = last_colon;
 		max_groups = 6;
 
-		/* Parse the hex prefix, bounded by hex_end. */
 		p = src;
 		has_cc = false;
 		before_count = 0;
@@ -294,13 +276,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 			int digit_count = 0;
 			uint16_t value = 0;
 
-			/*
-			 * Check for :: at current position.
-			 * If the second colon would be at or past
-			 * hex_end, treat the lone ':' as a
-			 * degenerate :: that spans the boundary.
-			 * See ARCHITECTURE.md §4.1.2.
-			 */
+			/* RFC 4291 §2.2: :: at most once. */
 			if (*p == ':') {
 				if (p + 1 < hex_end && *(p + 1) == ':') {
 					if (has_cc)
@@ -309,13 +285,8 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 					p += 2;
 					continue;
 				}
-				/*
-				 * Lone colon at the end of the hex part:
-				 * the :: straddles the hex/IPv4 boundary.
-				 * This is the degenerate case like
-				 * ::192.0.2.1 where the IPv4 suffix
-				 * follows :: directly.
-				 */
+				/* Lone colon at hex boundary: :: straddles
+				 * hex/IPv4 split (e.g. ::192.0.2.1). */
 				if (p + 1 == hex_end) {
 					if (has_cc)
 						return CIDR_ERR_PARSE;
@@ -350,13 +321,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 				before[before_count++] = value;
 			}
 
-			/*
-			 * Separator or end of hex part.
-			 * If the colon is part of :: (next char is also ':'
-			 * and within the hex part), do not consume it; the
-			 * top of loop will detect ::. Also skip consumption
-			 * when :: straddles the hex boundary.
-			 */
+			/* Separator: skip colon (but not if part of ::). */
 			if (p >= hex_end)
 				break;
 			if (*p != ':')
@@ -384,11 +349,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 		}
 		zero_groups = max_groups - total_explicit;
 
-		/*
-		 * Build the first 12 address bytes from hex groups
-		 * in network byte order (big-endian per group).
-		 * See ARCHITECTURE.md §3.2.
-		 */
+		/* Build first 12 bytes from hex groups in network byte order. */
 		byte_idx = 0;
 		for (i = 0; i < before_count; i++) {
 			out->addr.v6[byte_idx++] = (uint8_t)(before[i] >> 8);
@@ -403,7 +364,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 			out->addr.v6[byte_idx++] = (uint8_t)(after[i] & 0xFF);
 		}
 
-		/* Append the IPv4 suffix bytes (octets 12-15). */
+		/* Append IPv4 suffix bytes (octets 12-15). */
 		out->addr.v6[12] = ipv4_octets[0];
 		out->addr.v6[13] = ipv4_octets[1];
 		out->addr.v6[14] = ipv4_octets[2];
@@ -413,10 +374,8 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 		 * SAFETY: verify the IPv4-mapped prefix.
 		 * First 10 bytes must be zero, bytes 10-11 must be
 		 * 0xFF 0xFF. This rejects non-mapped mixed notation
-		 * (e.g. 2001:db8::192.0.2.1) and IPv4-compatible
-		 * addresses (e.g. ::192.0.2.1).
-		 * See ARCHITECTURE.md §4.1.2, RFC 5952 §5,
-		 * RFC 4291 §2.5.5.1.
+		 * and IPv4-compatible addresses. See ARCHITECTURE.md
+		 * §4.1.2, RFC 5952 §5, RFC 4291 §2.5.5.1.
 		 */
 		for (i = 0; i < 10; i++) {
 			if (out->addr.v6[i] != 0)
@@ -429,11 +388,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 		return CIDR_OK;
 	}
 
-	/*
-	 * Pure IPv6 path (full or compressed form).
-	 * Parse up to 8 hex groups, with :: appearing at most once.
-	 * See ARCHITECTURE.md §4.1.2.
-	 */
+	/* Pure IPv6 path (full or compressed form, up to 8 groups). */
 	max_groups = 8;
 	p = src;
 	has_cc = false;
@@ -444,7 +399,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 		int digit_count = 0;
 		uint16_t value = 0;
 
-		/* Detect :: token. */
+		/* RFC 4291 §2.2: :: at most once. */
 		if (*p == ':' && *(p + 1) == ':') {
 			if (has_cc)
 				return CIDR_ERR_PARSE;
@@ -477,11 +432,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 			before[before_count++] = value;
 		}
 
-		/*
-		 * Expect separator, ::, or end of string.
-		 * If the colon is part of :: (next char is also ':'),
-		 * do not consume it; the top of loop will detect ::.
-		 */
+		/* Expect ':', '::', or end. */
 		if (*p == ':') {
 			if (*(p + 1) != ':') {
 				p++;
@@ -513,10 +464,7 @@ addr_parse_ipv6(const char *src, cidr_addr_t *out)
 	}
 	zero_groups = 8 - total_explicit;
 
-	/*
-	 * Build 16 address bytes in network byte order.
-	 * See ARCHITECTURE.md §3.2.
-	 */
+	/* Build 16 address bytes in network byte order. */
 	byte_idx = 0;
 	for (i = 0; i < before_count; i++) {
 		out->addr.v6[byte_idx++] = (uint8_t)(before[i] >> 8);
