@@ -12,9 +12,6 @@
  *   - IPv4Address, IPv6Address types (ARCHITECTURE.md §8.6)
  *
  * Later phases add:
- *   7.3 - IPv4Network, IPv6Network types
- *   7.4 - SubnetIterator type
- *   7.5 - Bulk entry points
  *   7.6 - memoryview entry point
  */
 
@@ -2429,13 +2426,610 @@ static PyType_Spec subnetiterator_spec = {
     "libcidr.SubnetIterator", sizeof(SubnetIterator), 0, Py_TPFLAGS_DEFAULT,
     subnetiterator_slots};
 
+/* ===================================================================
+ * Bulk entry points.
+ * Module-level functions per ARCHITECTURE.md §8.8.1.
+ * =================================================================== */
+
+/*
+ * bulk_extract_prefixes - extract a cidr_prefix_t array from a Python
+ *                         list of IPv4Network/IPv6Network objects.
+ *
+ * obj:      Python sequence of network objects
+ * count:    receives the number of objects
+ * family:   receives the common address family
+ *
+ * Returns a heap-allocated array on success; NULL on error (exception
+ * set). Caller must free() the returned array.
+ * See ARCHITECTURE.md §8.8.1.
+ */
+static cidr_prefix_t *
+bulk_extract_prefixes(PyObject *obj, size_t *count, cidr_family_t *family)
+{
+	PyObject *seq;
+	Py_ssize_t n;
+	cidr_prefix_t *arr;
+	cidr_family_t fam = CIDR_AF_UNSPEC;
+
+	seq = PySequence_Fast(obj, "argument must be a list or tuple");
+	if (seq == NULL)
+		return NULL;
+
+	n = PySequence_Length(seq);
+	if (n < 0) {
+		Py_DECREF(seq);
+		return NULL;
+	}
+
+	/* Determine family from the first element. */
+	if (n > 0) {
+		PyObject *first = PySequence_GetItem(seq, 0);
+
+		if (first == NULL) {
+			Py_DECREF(seq);
+			return NULL;
+		}
+		if (PyObject_TypeCheck(first, ipv4network_type))
+			fam = CIDR_AF_INET;
+		else if (PyObject_TypeCheck(first, ipv6network_type))
+			fam = CIDR_AF_INET6;
+		else {
+			Py_DECREF(first);
+			Py_DECREF(seq);
+			PyErr_SetString(
+			    libcidr_FamilyError,
+			    "all items must be IPv4Network or IPv6Network");
+			return NULL;
+		}
+		Py_DECREF(first);
+	}
+
+	// NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
+	arr = (cidr_prefix_t *)malloc((size_t)n * sizeof(cidr_prefix_t));
+	if (arr == NULL && n > 0) {
+		Py_DECREF(seq);
+		PyErr_NoMemory();
+		return NULL;
+	}
+
+	for (Py_ssize_t i = 0; i < n; i++) {
+		PyObject *item = PySequence_GetItem(seq, i);
+		const cidr_prefix_t *src;
+
+		if (item == NULL) {
+			Py_DECREF(seq);
+			free(arr);
+			return NULL;
+		}
+		if (fam == CIDR_AF_INET) {
+			if (!PyObject_TypeCheck(item, ipv4network_type)) {
+				Py_DECREF(item);
+				Py_DECREF(seq);
+				free(arr);
+				PyErr_SetString(libcidr_FamilyError,
+				                "mixed IPv4 and IPv6 networks");
+				return NULL;
+			}
+			src = &((IPv4Network *)item)->prefix;
+		} else {
+			if (!PyObject_TypeCheck(item, ipv6network_type)) {
+				Py_DECREF(item);
+				Py_DECREF(seq);
+				free(arr);
+				PyErr_SetString(libcidr_FamilyError,
+				                "mixed IPv4 and IPv6 networks");
+				return NULL;
+			}
+			src = &((IPv6Network *)item)->prefix;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&arr[i], src, sizeof(cidr_prefix_t));
+		Py_DECREF(item);
+	}
+
+	Py_DECREF(seq);
+	*count = (size_t)n;
+	*family = fam;
+	return arr;
+}
+
+/*
+ * bulk_addrs_from_list - extract a cidr_addr_t array from a Python list
+ *                        of IPv4Address/IPv6Address objects.
+ *
+ * obj:      Python sequence of address objects
+ * count:    receives the number of objects
+ * family:   receives the common address family
+ *
+ * Returns a heap-allocated array on success; NULL on error (exception
+ * set). Caller must free() the returned array.
+ * See ARCHITECTURE.md §8.8.1.
+ */
+static cidr_addr_t *
+bulk_addrs_from_list(PyObject *obj, size_t *count, cidr_family_t *family)
+{
+	PyObject *seq;
+	Py_ssize_t n;
+	cidr_addr_t *arr;
+	cidr_family_t fam = CIDR_AF_UNSPEC;
+
+	seq = PySequence_Fast(obj, "argument must be a list or tuple");
+	if (seq == NULL)
+		return NULL;
+
+	n = PySequence_Length(seq);
+	if (n < 0) {
+		Py_DECREF(seq);
+		return NULL;
+	}
+
+	if (n > 0) {
+		PyObject *first = PySequence_GetItem(seq, 0);
+
+		if (first == NULL) {
+			Py_DECREF(seq);
+			return NULL;
+		}
+		if (PyObject_TypeCheck(first, ipv4address_type))
+			fam = CIDR_AF_INET;
+		else if (PyObject_TypeCheck(first, ipv6address_type))
+			fam = CIDR_AF_INET6;
+		else {
+			Py_DECREF(first);
+			Py_DECREF(seq);
+			PyErr_SetString(
+			    libcidr_FamilyError,
+			    "all items must be IPv4Address or IPv6Address");
+			return NULL;
+		}
+		Py_DECREF(first);
+	}
+
+	// NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
+	arr = (cidr_addr_t *)malloc((size_t)n * sizeof(cidr_addr_t));
+	if (arr == NULL && n > 0) {
+		Py_DECREF(seq);
+		PyErr_NoMemory();
+		return NULL;
+	}
+
+	for (Py_ssize_t i = 0; i < n; i++) {
+		PyObject *item = PySequence_GetItem(seq, i);
+		const cidr_addr_t *src;
+
+		if (item == NULL) {
+			Py_DECREF(seq);
+			free(arr);
+			return NULL;
+		}
+		if (fam == CIDR_AF_INET) {
+			if (!PyObject_TypeCheck(item, ipv4address_type)) {
+				Py_DECREF(item);
+				Py_DECREF(seq);
+				free(arr);
+				PyErr_SetString(
+				    libcidr_FamilyError,
+				    "mixed IPv4 and IPv6 addresses");
+				return NULL;
+			}
+			src = &((IPv4Address *)item)->addr;
+		} else {
+			if (!PyObject_TypeCheck(item, ipv6address_type)) {
+				Py_DECREF(item);
+				Py_DECREF(seq);
+				free(arr);
+				PyErr_SetString(
+				    libcidr_FamilyError,
+				    "mixed IPv4 and IPv6 addresses");
+				return NULL;
+			}
+			src = &((IPv6Address *)item)->addr;
+		}
+		// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+		memcpy(&arr[i], src, sizeof(cidr_addr_t));
+		Py_DECREF(item);
+	}
+
+	Py_DECREF(seq);
+	*count = (size_t)n;
+	*family = fam;
+	return arr;
+}
+
+/*
+ * libcidr.bulk_parse(srcs) -> list
+ *
+ * Parse a list of address strings. All items are attempted regardless of
+ * individual parse failures. Returns a list of IPv4Address/IPv6Address
+ * objects. Failed items appear as None in the result list. Raises
+ * ParseError or FamilyError after the full batch completes.
+ *
+ * Backed by cidr_bulk_parse(). See ARCHITECTURE.md §8.8.1.
+ */
+static PyObject *
+libcidr_bulk_parse(PyObject *self, PyObject *args)
+{
+	PyObject *seq;
+	PyObject *fast;
+	Py_ssize_t count;
+	const char **srcs = NULL;
+	PyObject *utf8_hold = NULL;
+	cidr_addr_t *out = NULL;
+	cidr_err_t *errs = NULL;
+	cidr_err_t rc;
+	PyObject *result = NULL;
+
+	(void)self;
+
+	if (!PyArg_ParseTuple(args, "O", &seq))
+		return NULL;
+
+	fast = PySequence_Fast(seq, "argument must be a list or tuple");
+	if (fast == NULL)
+		return NULL;
+
+	count = PySequence_Length(fast);
+	if (count < 0) {
+		Py_DECREF(fast);
+		return NULL;
+	}
+	if (count == 0) {
+		Py_DECREF(fast);
+		return PyList_New(0);
+	}
+
+	/* Allocate working arrays. */
+	srcs = (const char **)malloc((size_t)count * sizeof(const char *));
+	out = (cidr_addr_t *)malloc((size_t)count * sizeof(cidr_addr_t));
+	errs = (cidr_err_t *)malloc((size_t)count * sizeof(cidr_err_t));
+	utf8_hold = PyList_New(count);
+	if (srcs == NULL || out == NULL || errs == NULL || utf8_hold == NULL) {
+		PyErr_NoMemory();
+		goto error;
+	}
+
+	/* Pre-fill utf8_hold with Py_None for safe cleanup. */
+	for (Py_ssize_t i = 0; i < count; i++) {
+		Py_INCREF(Py_None);
+		// NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+		if (PyList_SetItem(utf8_hold, i, Py_None) < 0)
+			goto error;
+	}
+
+	/* Convert each Python string to a C string. */
+	for (Py_ssize_t i = 0; i < count; i++) {
+		PyObject *item = PySequence_GetItem(fast, i);
+		PyObject *utf8;
+
+		if (item == NULL)
+			goto error;
+		if (!PyUnicode_Check(item)) {
+			Py_DECREF(item);
+			PyErr_SetString(libcidr_InvalidArgumentError,
+			                "all items must be strings");
+			goto error;
+		}
+
+		utf8 = PyUnicode_AsEncodedString(item, "utf-8", "strict");
+		Py_DECREF(item);
+		if (utf8 == NULL)
+			goto error;
+		/* PyList_SetItem steals the utf8 reference. */
+		if (PyList_SetItem(utf8_hold, i, utf8) < 0)
+			goto error;
+		srcs[i] = PyBytes_AsString(utf8);
+	}
+
+	/* SAFETY: srcs[] pointers are valid because utf8_hold keeps the
+	 * bytes objects alive. utf8_hold is not released until after the
+	 * C call returns. */
+	rc = cidr_bulk_parse(srcs, (size_t)count, out, errs);
+
+	/* Build result list regardless of batch errors. */
+	result = PyList_New(count);
+	if (result == NULL)
+		goto error;
+
+	for (Py_ssize_t i = 0; i < count; i++) {
+		if (errs[i] == CIDR_OK) {
+			PyObject *addr_obj = binding_addr_to_pyobj(&out[i]);
+
+			if (addr_obj == NULL)
+				goto error;
+			/* PyList_SetItem steals addr_obj reference. */
+			if (PyList_SetItem(result, i, addr_obj) < 0)
+				goto error;
+		} else {
+			Py_INCREF(Py_None);
+			if (PyList_SetItem(result, i, Py_None) < 0)
+				goto error;
+		}
+	}
+
+	/* After full batch, raise on the return code (precedence handled
+	 * by cidr_bulk_parse). */
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		goto error;
+	}
+
+	Py_DECREF(fast);
+	Py_DECREF(utf8_hold);
+	// NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+	free((void *)srcs);
+	free(out);
+	free(errs);
+	return result;
+
+error:
+	Py_XDECREF(result);
+	Py_DECREF(fast);
+	Py_XDECREF(utf8_hold);
+	// NOLINTNEXTLINE(bugprone-multi-level-implicit-pointer-conversion)
+	free((void *)srcs);
+	free(out);
+	free(errs);
+	return NULL;
+}
+
+/*
+ * libcidr.bulk_contains(addrs, prefixes) -> list
+ *
+ * For each address, return the index of the first matching prefix, or -1
+ * if no prefix matched. Backed by cidr_bulk_contains(). Mixed-family
+ * input raises FamilyError. See ARCHITECTURE.md §8.8.1.
+ */
+static PyObject *
+libcidr_bulk_contains(PyObject *self, PyObject *args)
+{
+	PyObject *addrs_obj;
+	PyObject *prefixes_obj;
+	cidr_addr_t *addrs = NULL;
+	cidr_prefix_t *prefixes = NULL;
+	size_t addr_count;
+	size_t prefix_count;
+	cidr_family_t addr_fam;
+	cidr_family_t prefix_fam;
+	ssize_t *matches = NULL;
+	cidr_err_t rc;
+	PyObject *result = NULL;
+
+	(void)self;
+
+	if (!PyArg_ParseTuple(args, "OO", &addrs_obj, &prefixes_obj))
+		return NULL;
+
+	addrs = bulk_addrs_from_list(addrs_obj, &addr_count, &addr_fam);
+	if (addrs == NULL)
+		return NULL;
+
+	prefixes =
+	    bulk_extract_prefixes(prefixes_obj, &prefix_count, &prefix_fam);
+	if (prefixes == NULL)
+		goto error;
+
+	matches = malloc(addr_count * sizeof(ssize_t));
+	if (matches == NULL && addr_count > 0) {
+		PyErr_NoMemory();
+		goto error;
+	}
+
+	if (addr_count > 0 && prefix_count > 0 && addr_fam != prefix_fam) {
+		PyErr_SetString(
+		    libcidr_FamilyError,
+		    "address family mismatch between addrs and prefixes");
+		goto error;
+	}
+
+	rc = cidr_bulk_contains(addrs, addr_count, prefixes, prefix_count,
+	                        matches, NULL);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		goto error;
+	}
+
+	result = PyList_New((Py_ssize_t)addr_count);
+	if (result == NULL)
+		goto error;
+
+	for (size_t i = 0; i < addr_count; i++) {
+		PyObject *item = PyLong_FromSsize_t(matches[i]);
+
+		if (item == NULL)
+			goto error;
+		if (PyList_SetItem(result, (Py_ssize_t)i, item) < 0)
+			goto error;
+	}
+
+	free(matches);
+	free(prefixes);
+	free(addrs);
+	return result;
+
+error:
+	Py_XDECREF(result);
+	free(matches);
+	free(prefixes);
+	free(addrs);
+	return NULL;
+}
+
+/*
+ * libcidr.bulk_aggregate(prefixes) -> list
+ *
+ * Aggregate a list of networks to a minimal covering set. Returns a new
+ * list; the input is not modified. Backed by cidr_bulk_aggregate().
+ * Mixed-family input raises FamilyError. See ARCHITECTURE.md §8.8.1.
+ */
+static PyObject *
+libcidr_bulk_aggregate(PyObject *self, PyObject *args)
+{
+	PyObject *prefixes_obj;
+	cidr_prefix_t *prefixes = NULL;
+	cidr_prefix_t *copy = NULL;
+	size_t count;
+	size_t out_count;
+	cidr_family_t fam;
+	cidr_err_t rc;
+	PyObject *result = NULL;
+
+	(void)self;
+
+	if (!PyArg_ParseTuple(args, "O", &prefixes_obj))
+		return NULL;
+
+	prefixes = bulk_extract_prefixes(prefixes_obj, &count, &fam);
+	if (prefixes == NULL)
+		return NULL;
+
+	if (count == 0) {
+		free(prefixes);
+		return PyList_New(0);
+	}
+
+	/*
+	 * Copy the prefix array: cidr_bulk_aggregate operates in place
+	 * on the caller's array. We must not modify the caller's list.
+	 * See ARCHITECTURE.md §8.8.1.
+	 */
+	copy = malloc(count * sizeof(cidr_prefix_t));
+	if (copy == NULL) {
+		PyErr_NoMemory();
+		goto error;
+	}
+	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+	memcpy(copy, prefixes, count * sizeof(cidr_prefix_t));
+
+	rc = cidr_bulk_aggregate(copy, count, &out_count);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		goto error;
+	}
+
+	/* Build result from the first out_count prefixes. */
+	result = PyList_New((Py_ssize_t)out_count);
+	if (result == NULL)
+		goto error;
+
+	for (size_t i = 0; i < out_count; i++) {
+		PyObject *net_obj = binding_prefix_to_pyobj(&copy[i]);
+
+		if (net_obj == NULL)
+			goto error;
+		if (PyList_SetItem(result, (Py_ssize_t)i, net_obj) < 0)
+			goto error;
+	}
+
+	free(copy);
+	free(prefixes);
+	return result;
+
+error:
+	Py_XDECREF(result);
+	free(copy);
+	free(prefixes);
+	return NULL;
+}
+
+/*
+ * libcidr.bulk_sort(prefixes, order) -> list
+ *
+ * Sort a list of networks in the specified order. Returns a new list;
+ * the input is not modified. Backed by cidr_bulk_sort().
+ * See ARCHITECTURE.md §8.8.1.
+ */
+static PyObject *
+libcidr_bulk_sort(PyObject *self, PyObject *args)
+{
+	PyObject *prefixes_obj;
+	int order;
+	cidr_prefix_t *prefixes = NULL;
+	cidr_prefix_t *copy = NULL;
+	size_t count;
+	cidr_family_t fam;
+	cidr_err_t rc;
+	PyObject *result = NULL;
+
+	(void)self;
+
+	if (!PyArg_ParseTuple(args, "Oi", &prefixes_obj, &order))
+		return NULL;
+
+	prefixes = bulk_extract_prefixes(prefixes_obj, &count, &fam);
+	if (prefixes == NULL)
+		return NULL;
+
+	if (count == 0) {
+		free(prefixes);
+		return PyList_New(0);
+	}
+
+	/*
+	 * Copy the prefix array: cidr_bulk_sort operates in place on the
+	 * caller's array. We must not modify the caller's list.
+	 * See ARCHITECTURE.md §8.8.1.
+	 */
+	copy = (cidr_prefix_t *)malloc(count * sizeof(cidr_prefix_t));
+	if (copy == NULL) {
+		PyErr_NoMemory();
+		goto error;
+	}
+	// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+	memcpy(copy, prefixes, count * sizeof(cidr_prefix_t));
+
+	rc = cidr_bulk_sort(copy, count, (cidr_sort_order_t)order);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		goto error;
+	}
+
+	result = PyList_New((Py_ssize_t)count);
+	if (result == NULL)
+		goto error;
+
+	for (size_t i = 0; i < count; i++) {
+		PyObject *net_obj = binding_prefix_to_pyobj(&copy[i]);
+
+		if (net_obj == NULL)
+			goto error;
+		if (PyList_SetItem(result, (Py_ssize_t)i, net_obj) < 0)
+			goto error;
+	}
+
+	free(copy);
+	free(prefixes);
+	return result;
+
+error:
+	Py_XDECREF(result);
+	free(copy);
+	free(prefixes);
+	return NULL;
+}
+
 /*
  * Module method table.
- * Populated in later phases as module-level functions are added:
- *   7.5 - bulk_parse, bulk_contains, bulk_aggregate, bulk_sort
- *   7.6 - bulk_contains_packed
  */
-static PyMethodDef libcidr_methods[] = {{NULL, NULL, 0, NULL}};
+static PyMethodDef libcidr_methods[] = {
+    {"bulk_parse", libcidr_bulk_parse, METH_VARARGS,
+     "bulk_parse(srcs) -> list\n\n"
+     "Parse a list of address strings. All items are attempted; "
+     "failed items appear as None. Raises ParseError or FamilyError "
+     "after the full batch completes."},
+    {"bulk_contains", libcidr_bulk_contains, METH_VARARGS,
+     "bulk_contains(addrs, prefixes) -> list\n\n"
+     "For each address, return the index of the first matching "
+     "prefix, or -1 if no prefix matched."},
+    {"bulk_aggregate", libcidr_bulk_aggregate, METH_VARARGS,
+     "bulk_aggregate(prefixes) -> list\n\n"
+     "Aggregate a list of networks to a minimal covering set. "
+     "Returns a new list; the input is not modified."},
+    {"bulk_sort", libcidr_bulk_sort, METH_VARARGS,
+     "bulk_sort(prefixes, order) -> list\n\n"
+     "Sort a list of networks in the specified order "
+     "(SORT_NETWORK_ASC or SORT_PFXLEN_DESC). Returns a new list; "
+     "the input is not modified."},
+    {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef libcidr_module = {
     PyModuleDef_HEAD_INIT,

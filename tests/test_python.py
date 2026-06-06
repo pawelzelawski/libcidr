@@ -1157,5 +1157,192 @@ class TestNetworkEdgeCases(unittest.TestCase):
         self.assertEqual(restored, net)
 
 
+class TestBulkFunctions(unittest.TestCase):
+    """Verify module-level bulk entry points per ARCHITECTURE.md §8.8.1."""
+
+    def test_bulk_parse_all_valid(self):
+        srcs = ['10.0.0.1', '192.168.1.1', '1.2.3.4']
+        result = libcidr.bulk_parse(srcs)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 3)
+        for addr in result:
+            self.assertIsInstance(addr, libcidr.IPv4Address)
+        self.assertEqual(str(result[0]), '10.0.0.1')
+        self.assertEqual(str(result[1]), '192.168.1.1')
+        self.assertEqual(str(result[2]), '1.2.3.4')
+
+    def test_bulk_parse_all_valid_ipv6(self):
+        srcs = ['::1', '2001:db8::1', 'fe80::1']
+        result = libcidr.bulk_parse(srcs)
+        self.assertEqual(len(result), 3)
+        for addr in result:
+            self.assertIsInstance(addr, libcidr.IPv6Address)
+
+    def test_bulk_parse_partial_failure(self):
+        srcs = ['10.0.0.1', 'not-an-address', '192.168.1.1']
+        with self.assertRaises(libcidr.ParseError):
+            libcidr.bulk_parse(srcs)
+        with self.assertRaises(libcidr.CIDRError):
+            libcidr.bulk_parse(srcs)
+
+    def test_bulk_parse_empty(self):
+        result = libcidr.bulk_parse([])
+        self.assertEqual(result, [])
+
+    def test_bulk_parse_cross_family(self):
+        srcs = ['10.0.0.1', '2001:db8::1']
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.bulk_parse(srcs)
+        with self.assertRaises(libcidr.CIDRError):
+            libcidr.bulk_parse(srcs)
+
+    def test_bulk_parse_invalid_type_raises(self):
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.bulk_parse([123])
+
+    def test_bulk_contains_first_match(self):
+        addrs = [
+            libcidr.IPv4Address('10.0.0.1'),
+            libcidr.IPv4Address('192.168.1.1'),
+        ]
+        prefixes = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        result = libcidr.bulk_contains(addrs, prefixes)
+        self.assertEqual(result, [0, 1])
+
+    def test_bulk_contains_no_match(self):
+        addrs = [libcidr.IPv4Address('1.2.3.4')]
+        prefixes = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        result = libcidr.bulk_contains(addrs, prefixes)
+        self.assertEqual(result, [-1])
+
+    def test_bulk_contains_empty_addresses(self):
+        result = libcidr.bulk_contains([], [libcidr.IPv4Network('0.0.0.0/0')])
+        self.assertEqual(result, [])
+
+    def test_bulk_contains_empty_prefixes(self):
+        addrs = [libcidr.IPv4Address('10.0.0.1')]
+        result = libcidr.bulk_contains(addrs, [])
+        self.assertEqual(result, [-1])
+
+    def test_bulk_contains_cross_family(self):
+        addrs = [libcidr.IPv4Address('10.0.0.1')]
+        prefixes = [libcidr.IPv6Network('2001:db8::/32')]
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.bulk_contains(addrs, prefixes)
+
+    def test_bulk_aggregate_single(self):
+        nets = [libcidr.IPv4Network('10.0.0.0/8')]
+        result = libcidr.bulk_aggregate(nets)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(str(result[0]), '10.0.0.0/8')
+
+    def test_bulk_aggregate_adjacent_merge(self):
+        nets = [
+            libcidr.IPv4Network('192.168.0.0/24'),
+            libcidr.IPv4Network('192.168.1.0/24'),
+        ]
+        result = libcidr.bulk_aggregate(nets)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(str(result[0]), '192.168.0.0/23')
+
+    def test_bulk_aggregate_containment(self):
+        nets = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('10.1.0.0/16'),
+            libcidr.IPv4Network('10.1.2.0/24'),
+        ]
+        result = libcidr.bulk_aggregate(nets)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(str(result[0]), '10.0.0.0/8')
+
+    def test_bulk_aggregate_empty(self):
+        result = libcidr.bulk_aggregate([])
+        self.assertEqual(result, [])
+
+    def test_bulk_aggregate_input_not_modified(self):
+        nets = [
+            libcidr.IPv4Network('192.168.0.0/24'),
+            libcidr.IPv4Network('192.168.1.0/24'),
+        ]
+        orig_strs = [str(n) for n in nets]
+        libcidr.bulk_aggregate(nets)
+        self.assertEqual([str(n) for n in nets], orig_strs)
+
+    def test_bulk_aggregate_cross_family(self):
+        nets = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv6Network('2001:db8::/32'),
+        ]
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.bulk_aggregate(nets)
+
+    def test_bulk_aggregate_matches_ipaddress(self):
+        import ipaddress
+        prefixes_str = [
+            '192.168.0.0/24',
+            '192.168.1.0/24',
+            '10.0.0.0/8',
+            '10.1.0.0/16',
+        ]
+        libcidr_nets = [libcidr.IPv4Network(p) for p in prefixes_str]
+        ipaddr_nets = [ipaddress.IPv4Network(p) for p in prefixes_str]
+        libcidr_out = libcidr.bulk_aggregate(libcidr_nets)
+        ipaddr_out = list(ipaddress.collapse_addresses(ipaddr_nets))
+        libcidr_strs = sorted(str(n) for n in libcidr_out)
+        ipaddr_strs = sorted(str(n) for n in ipaddr_out)
+        self.assertEqual(libcidr_strs, ipaddr_strs)
+
+    def test_bulk_sort_network_asc(self):
+        nets = [
+            libcidr.IPv4Network('192.168.0.0/24'),
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('172.16.0.0/12'),
+        ]
+        result = libcidr.bulk_sort(nets, libcidr.SORT_NETWORK_ASC)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(str(result[0]), '10.0.0.0/8')
+        self.assertEqual(str(result[1]), '172.16.0.0/12')
+        self.assertEqual(str(result[2]), '192.168.0.0/24')
+
+    def test_bulk_sort_pfxlen_desc(self):
+        nets = [
+            libcidr.IPv4Network('10.0.0.0/16'),
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('10.0.0.0/24'),
+        ]
+        result = libcidr.bulk_sort(nets, libcidr.SORT_PFXLEN_DESC)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(str(result[0]), '10.0.0.0/24')
+        self.assertEqual(str(result[1]), '10.0.0.0/16')
+        self.assertEqual(str(result[2]), '10.0.0.0/8')
+
+    def test_bulk_sort_empty(self):
+        result = libcidr.bulk_sort([], libcidr.SORT_NETWORK_ASC)
+        self.assertEqual(result, [])
+
+    def test_bulk_sort_input_not_modified(self):
+        nets = [
+            libcidr.IPv4Network('192.168.0.0/24'),
+            libcidr.IPv4Network('10.0.0.0/8'),
+        ]
+        orig_strs = [str(n) for n in nets]
+        libcidr.bulk_sort(nets, libcidr.SORT_NETWORK_ASC)
+        self.assertEqual([str(n) for n in nets], orig_strs)
+
+    def test_bulk_sort_cross_family(self):
+        nets = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv6Network('2001:db8::/32'),
+        ]
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.bulk_sort(nets, libcidr.SORT_NETWORK_ASC)
+
+
 if __name__ == '__main__':
     unittest.main()

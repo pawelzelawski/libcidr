@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 7 -- Python Binding Layer (IN PROGRESS)
-**Next Task**: Phase 7.5 -- Bulk entry points
+**Next Task**: Phase 7.6 -- bulk_contains_packed() memoryview entry point
 
 ### Phase Summary
 
@@ -15,7 +15,7 @@
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
-| 7 | Python Binding Layer | IN PROGRESS | 185/185 | CPython stable ABI extension |
+| 7 | Python Binding Layer | IN PROGRESS | 208/208 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
 ### Quality Milestones
@@ -901,7 +901,7 @@ no partial binding makes sense before all C components are tested and stable.
   raise `StopIteration`; on `CIDR_OK`, construct and return the next network
   object
 
-**7.5 -- Bulk entry points**
+**7.5 -- Bulk entry points** ✓ DONE
 - Implement `bulk_parse`, `bulk_contains`, `bulk_aggregate`, `bulk_sort`
   as module-level functions per ARCHITECTURE.md §8.8.1
 - `bulk_parse`: processes all items; raises after full batch; follow
