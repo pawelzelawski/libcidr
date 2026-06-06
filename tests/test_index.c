@@ -734,8 +734,11 @@ fail:
 }
 
 /*
- * test_index_lookup_family_mismatch - address family mismatch returns
- * CIDR_ERR_FAMILY in per-item error array, -1 in matches.
+ * test_index_lookup_family_mismatch - address family mismatch fails the
+ * whole call with no output writes.
+ *
+ * See ARCHITECTURE.md §6.2: structural input errors in the address batch
+ * return CIDR_ERR_FAMILY immediately. matches and errs must remain untouched.
  */
 int
 test_index_lookup_family_mismatch(void)
@@ -756,17 +759,72 @@ test_index_lookup_family_mismatch(void)
 		return 1;
 	}
 
-	if (cidr_index_lookup(index, addrs, 1, &match, &err) != CIDR_OK) {
+	match = 123;
+	err = CIDR_OK;
+
+	if (cidr_index_lookup(index, addrs, 1, &match, &err) !=
+	    CIDR_ERR_FAMILY) {
 		cidr_index_destroy(index);
 		return 1;
 	}
 
-	/* Family mismatch: match is -1, error is CIDR_ERR_FAMILY. */
-	if (match != -1) {
+	if (match != 123) {
 		cidr_index_destroy(index);
 		return 1;
 	}
-	if (err != CIDR_ERR_FAMILY) {
+	if (err != CIDR_OK) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+
+	cidr_index_destroy(index);
+	return 0;
+}
+
+/*
+ * test_index_lookup_unspec_address - CIDR_AF_UNSPEC in addrs fails the
+ * whole call with no output writes.
+ *
+ * The address batch is validated before traversal begins, so neither matches
+ * nor errs may be modified on CIDR_ERR_INVAL. See ARCHITECTURE.md §3.1 and
+ * §6.2.
+ */
+int
+test_index_lookup_unspec_address(void)
+{
+	cidr_prefix_t prefixes[1];
+	cidr_addr_t addrs[2];
+	ssize_t matches[2];
+	cidr_err_t errs[2];
+	cidr_index_t *index = NULL;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_index_create(prefixes, 1, &index) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_parse("10.1.2.3", &addrs[0]) != CIDR_OK) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+	memset(&addrs[1], 0, sizeof(addrs[1]));
+
+	matches[0] = 10;
+	matches[1] = 11;
+	errs[0] = CIDR_ERR_PARSE;
+	errs[1] = CIDR_ERR_DONE;
+
+	if (cidr_index_lookup(index, addrs, 2, matches, errs) !=
+	    CIDR_ERR_INVAL) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+
+	if (matches[0] != 10 || matches[1] != 11) {
+		cidr_index_destroy(index);
+		return 1;
+	}
+	if (errs[0] != CIDR_ERR_PARSE || errs[1] != CIDR_ERR_DONE) {
 		cidr_index_destroy(index);
 		return 1;
 	}

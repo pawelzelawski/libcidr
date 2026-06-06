@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 6 -- Patricia Trie Index (IN PROGRESS)
-**Next Task**: Phase 6.5 -- `cidr_index_lookup()`
+**Current Phase**: Phase 7 -- Python Binding Layer (PENDING)
+**Next Task**: Phase 7.1 -- Module skeleton and exception hierarchy
 
 ### Phase Summary
 
@@ -14,7 +14,7 @@
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
-| 6 | Patricia Trie Index | IN PROGRESS | 19/19 | Phase 6.2 complete: binary Patricia trie, full lookup, duplicate resolution |
+| 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
@@ -760,7 +760,7 @@ the prefix array using the Phase 4 radix sort engine.)
 - If node count during build would exceed `UINT32_MAX - 1`, return
   `CIDR_ERR_INVAL` per ARCHITECTURE.md §6.2
 
-**6.5 -- `cidr_index_lookup()`**
+**6.5 -- `cidr_index_lookup()`** ✓ DONE
 - Implement the traversal loop per ARCHITECTURE.md §6.3:
   - Advance `skip` bits; extract `branch` bits as array index; descend to
     `nodes[base + index]`
@@ -772,7 +772,7 @@ the prefix array using the Phase 4 radix sort engine.)
 - `errs` may be NULL; when `count > 0` and `matches` is NULL, return
   `CIDR_ERR_INVAL`
 
-**6.6 -- `cidr_index_destroy()`**
+**6.6 -- `cidr_index_destroy()`** ✓ DONE
 - Implement as NULL-safe: `if (index == NULL) return;`
 - Free the node array and the copied prefix array; free the index struct
 - Returns `void` -- no error path possible
@@ -797,21 +797,27 @@ File: `tests/test_index.c`
 - `test_index_create_mixed_family` -- CIDR_ERR_FAMILY
 - `test_index_create_null` -- CIDR_ERR_INVAL for NULL prefixes or NULL out
 - `test_index_lookup_null_matches_nonzero_count` -- CIDR_ERR_INVAL
+- `test_index_lookup_unspec_address` -- CIDR_ERR_INVAL; no output written
 - `test_index_destroy_null_safe` -- no crash
 - `test_index_memory_clean` -- Valgrind: no leaks after destroy
 
+File: `tests/test_tsan.c`
+
+- `test_concurrent_index_lookup` -- concurrent reads on one completed index;
+  no races under TSan
+
 ### Phase 6 Completion Criteria
 
-- [ ] All test_index.c tests pass on all four targets
-- [ ] `test_index_interior_node_prefix` passes -- quality milestone M11
+- [x] All test_index.c tests pass on all four targets
+- [x] `test_index_interior_node_prefix` passes -- quality milestone M11
       (LC-trie LPM semantics verified)
-- [ ] `test_index_lpm_matches_sorted_bulk` passes for routing-table-scale
+- [x] `test_index_lpm_matches_sorted_bulk` passes for routing-table-scale
       inputs
-- [ ] Valgrind clean: no leaks, no use-after-free on all index test paths
-- [ ] ASan/UBSan clean on every target whose toolchain supports them
-- [ ] TSan: `test_concurrent_index_lookup` passes (concurrent reads on a
+- [x] Valgrind clean: no leaks, no use-after-free on all index test paths
+- [x] ASan/UBSan clean on every target whose toolchain supports them
+- [x] TSan: `test_concurrent_index_lookup` passes (concurrent reads on a
       completed index; no races per ARCHITECTURE.md §1.4)
-- [ ] Memory discipline check: `malloc`/`free` present only in
+- [x] Memory discipline check: `malloc`/`free` present only in
       `src/cidr_index.c` as expected
 
 ---

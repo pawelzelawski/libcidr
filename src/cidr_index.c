@@ -948,7 +948,11 @@ cidr_index_destroy(cidr_index_t *index)
 /*
  * cidr_index_lookup - longest-prefix match for each address in an array.
  *
- * Traverses the packed LC-trie for each address. The traversal advances
+ * Validates the full input batch before any traversal. If any address has
+ * family CIDR_AF_UNSPEC, returns CIDR_ERR_INVAL with no output written. If
+ * any address family does not match the index family, returns
+ * CIDR_ERR_FAMILY with no output written. When validation succeeds,
+ * traverses the packed LC-trie for each address. The traversal advances
  * skip bits, extracts branch bits as a direct child-slot index, and
  * descends to nodes[base + index]. At every node with prefix_idx !=
  * UINT32_MAX, the prefix is verified against the queried address and then
@@ -971,6 +975,19 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 	if (addrs == NULL || matches == NULL)
 		return CIDR_ERR_INVAL;
 
+	/*
+	 * SAFETY: structural input errors fail the whole call with no side
+	 * effects. Validate the entire address batch before touching matches
+	 * or errs so the caller never observes partially written output.
+	 * See ARCHITECTURE.md §6.2.
+	 */
+	for (size_t i = 0; i < count; i++) {
+		if (addrs[i].family == CIDR_AF_UNSPEC)
+			return CIDR_ERR_INVAL;
+		if (addrs[i].family != index->family)
+			return CIDR_ERR_FAMILY;
+	}
+
 	addr_len = (index->family == CIDR_AF_INET) ? 4 : 16;
 	key_bits = (index->family == CIDR_AF_INET) ? 32 : 128;
 
@@ -978,19 +995,6 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 		ssize_t best;
 		int bit_pos;
 		const cidr_lctrie_node_t *node;
-
-		if (addrs[i].family == CIDR_AF_UNSPEC) {
-			if (errs != NULL)
-				errs[i] = CIDR_ERR_INVAL;
-			matches[i] = -1;
-			continue;
-		}
-		if (addrs[i].family != index->family) {
-			if (errs != NULL)
-				errs[i] = CIDR_ERR_FAMILY;
-			matches[i] = -1;
-			continue;
-		}
 
 		best = -1;
 		bit_pos = 0;

@@ -126,6 +126,7 @@ extern int test_bulk_sort_unspec_family(void);
 #ifdef CIDR_TSAN
 extern int test_concurrent_bulk_sort_independent(void);
 extern int test_concurrent_bulk_aggregate_independent(void);
+extern int test_concurrent_index_lookup(void);
 #endif
 
 /*
@@ -169,6 +170,7 @@ extern int test_index_no_match(void);
 extern int test_index_memory_clean(void);
 extern int test_index_lpm_matches_sorted_bulk(void);
 extern int test_index_lookup_family_mismatch(void);
+extern int test_index_lookup_unspec_address(void);
 extern int test_index_routing_table_scale(void);
 
 int tests_run = 0;
@@ -332,6 +334,7 @@ main(void)
 	    test_concurrent_bulk_sort_independent);
 	RUN("test_concurrent_bulk_aggregate_independent",
 	    test_concurrent_bulk_aggregate_independent);
+	RUN("test_concurrent_index_lookup", test_concurrent_index_lookup);
 #endif
 
 	RUN("test_classify_each_ipv4_block", test_classify_each_ipv4_block);
@@ -380,6 +383,8 @@ main(void)
 	    test_index_lpm_matches_sorted_bulk);
 	RUN("test_index_lookup_family_mismatch",
 	    test_index_lookup_family_mismatch);
+	RUN("test_index_lookup_unspec_address",
+	    test_index_lookup_unspec_address);
 	RUN("test_index_routing_table_scale", test_index_routing_table_scale);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
