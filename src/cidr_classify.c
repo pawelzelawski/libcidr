@@ -3,8 +3,8 @@
  *
  * Contains the compile-time classification table encoding the IANA
  * special-purpose IPv4 and IPv6 address registry snapshot 2025-10-09.
- * Used by cidr_addr_classify() (declared in libcidr.h) which is
- * implemented in Phase 5.2.
+ * Implements cidr_addr_classify() which performs a linear scan over the
+ * table and returns a cidr_class_t bitmask.
  *
  * See ARCHITECTURE.md §7 for the classification specification,
  * ARCHITECTURE.md §7.2 for the flag registry and block tables.
@@ -28,7 +28,7 @@ static const struct {
 	uint8_t prefix[16];
 	uint8_t pfxlen;
 	cidr_class_t flags;
-} classify_table[] __attribute__((unused)) = {
+} classify_table[] = {
     /*
      * IPv4 special-purpose blocks -- IANA snapshot 2025-10-09.
      * See ARCHITECTURE.md §7.2 for the full table specification.
@@ -279,3 +279,104 @@ static const struct {
 /* Table element count, computed at compile time. */
 #define CLASSIFY_TABLE_COUNT                                                   \
 	(sizeof(classify_table) / sizeof(classify_table[0]))
+
+/*
+ * cidr_addr_classify - classify an address against the IANA special-purpose
+ *                      registry.
+ *
+ * Performs a linear scan of the compile-time classification table
+ * (ARCHITECTURE.md S.7.2) and returns a bitmask of all matching flags.
+ * Multiple flags may be set when the address falls within overlapping blocks
+ * (e.g. a 2001::/32 address matches both the /23 parent block and the /32
+ * Teredo sub-block).
+ *
+ * If no special-purpose block matches, CIDR_CLASS_GLOBAL is returned.
+ * CIDR_CLASS_GLOBAL is mutually exclusive with every other flag -- when
+ * any special-purpose flag is set, CIDR_CLASS_GLOBAL is not set.
+ * See ARCHITECTURE.md S.7.2 for the mutual exclusivity contract.
+ *
+ * addr: pointer to a valid cidr_addr_t (family must be CIDR_AF_INET or
+ *       CIDR_AF_INET6)
+ * out:  caller-provided cidr_class_t; on success receives the classification
+ *       bitmask
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addr or out is NULL, or if addr->family is
+ *   CIDR_AF_UNSPEC.
+ *
+ * Complexity: O(n) where n is the number of table entries (approximately 53,
+ * a compile-time constant per ARCHITECTURE.md S.7.3). In practice O(1).
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md S.7.1 for the classification function specification.
+ */
+cidr_err_t
+cidr_addr_classify(const cidr_addr_t *addr, cidr_class_t *out)
+{
+	cidr_class_t result = 0;
+	size_t addr_len;
+	const uint8_t *addr_bytes;
+
+	if (addr == NULL || out == NULL)
+		return CIDR_ERR_INVAL;
+	if (addr->family == CIDR_AF_UNSPEC)
+		return CIDR_ERR_INVAL;
+
+	if (addr->family == CIDR_AF_INET) {
+		addr_len = 4;
+		addr_bytes = addr->addr.v4;
+	} else {
+		addr_len = 16;
+		addr_bytes = addr->addr.v6;
+	}
+
+	/*
+	 * SAFETY: CLASSIFY_TABLE_COUNT is a compile-time constant (53 entries).
+	 * The linear scan is O(1) in practice per ARCHITECTURE.md S.7.3.
+	 */
+	for (size_t i = 0; i < CLASSIFY_TABLE_COUNT; i++) {
+		uint8_t byte_mask;
+		size_t byte;
+		bool matches = true;
+
+		/* Skip entries of a different address family. */
+		if (classify_table[i].family != addr->family)
+			continue;
+
+		/*
+		 * Mask-and-compare: for each byte of the address, apply the
+		 * prefix mask derived from pfxlen and compare to the table
+		 * entry's prefix byte. This is equivalent to
+		 * cidr_prefix_contains() logic per ARCHITECTURE.md §4.3.5.
+		 */
+		for (byte = 0; byte < addr_len; byte++) {
+			if (classify_table[i].pfxlen >= (byte + 1) * 8) {
+				byte_mask = 0xFF;
+			} else if (classify_table[i].pfxlen <= byte * 8) {
+				byte_mask = 0x00;
+			} else {
+				int remaining =
+				    classify_table[i].pfxlen - (int)(byte * 8);
+				byte_mask = (uint8_t)(0xFF << (8 - remaining));
+			}
+
+			if ((addr_bytes[byte] & byte_mask) !=
+			    classify_table[i].prefix[byte]) {
+				matches = false;
+				break;
+			}
+		}
+
+		if (matches)
+			result |= classify_table[i].flags;
+	}
+
+	/* SAFETY: CIDR_CLASS_GLOBAL is set only when no special-purpose block
+	 * matched. It is mutually exclusive with all other flags, as documented
+	 * in ARCHITECTURE.md S.7.2. */
+	if (result == 0)
+		result = CIDR_CLASS_GLOBAL;
+
+	*out = result;
+	return CIDR_OK;
+}

@@ -726,4 +726,35 @@ cidr_err_t cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count,
                                size_t *out_count)
     __attribute__((warn_unused_result));
 
+/*
+ * cidr_addr_classify - classify an address against the IANA special-purpose
+ *                      registry.
+ *
+ * Returns a bitmask of CIDR_CLASS_* flags identifying which IANA
+ * special-purpose blocks the address falls within. Multiple flags may be
+ * set when the address lies within overlapping blocks. When no special-purpose
+ * block matches, CIDR_CLASS_GLOBAL is returned.
+ *
+ * CIDR_CLASS_GLOBAL is mutually exclusive with every other flag -- it is
+ * never set alongside any other CIDR_CLASS_* value.
+ *
+ * addr: pointer to a valid cidr_addr_t (family must be CIDR_AF_INET or
+ *       CIDR_AF_INET6)
+ * out:  caller-provided cidr_class_t; on success receives the classification
+ *       bitmask
+ *
+ * Returns CIDR_OK on success.
+ * Returns CIDR_ERR_INVAL if addr or out is NULL, or if addr->family is
+ *   CIDR_AF_UNSPEC.
+ *
+ * Complexity: O(n) where n is the number of entries in the compile-time
+ * classification table (approximately 53); in practice O(1).
+ * No allocation occurs.
+ *
+ * See ARCHITECTURE.md §7.1 for the classification specification,
+ * ARCHITECTURE.md §7.2 for the flag registry and block tables.
+ */
+cidr_err_t cidr_addr_classify(const cidr_addr_t *addr, cidr_class_t *out)
+    __attribute__((warn_unused_result));
+
 #endif /* LIBCIDR_H */

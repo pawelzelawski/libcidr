@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 5 -- Address Classification (IN PROGRESS)
-**Next Task**: Phase 5.2 -- cidr_addr_classify()
+**Current Phase**: Phase 5 -- Address Classification (COMPLETE)
+**Next Task**: Phase 6 -- Patricia Trie Index
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
-| 5 | Address Classification | IN PROGRESS | 0/0 | IANA table, classify function |
+| 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
@@ -630,7 +630,7 @@ Phase 3 arithmetic, but the public function signature requires only Phase 2.)
   must be present; add a comment attributing them correctly, not to RFC 6890
 - `CIDR_IANA_SNAPSHOT = 20251009` defined in `include/libcidr.h`
 
-**5.2 -- `cidr_addr_classify()`**
+**5.2 -- `cidr_addr_classify()`** ✓ DONE**
 - Implement linear scan over the classification table in `src/cidr_classify.c`
 - For each entry, test whether the input address falls within the entry's
   prefix using mask-and-compare logic; OR the entry's flags into the result
@@ -641,11 +641,12 @@ Phase 3 arithmetic, but the public function signature requires only Phase 2.)
 - The scan is O(1) in practice -- the table is a compile-time constant of
   approximately 53 entries; add a `SAFETY:` comment noting the table size
 
-**5.3 -- `cidr_class_t` and `CIDR_CLASS_*` constants**
+**5.3 -- `cidr_class_t` and `CIDR_CLASS_*` constants** ✓ DONE
 - Define `cidr_class_t` as `uint32_t` in `include/libcidr.h`
 - Define all 23 `CIDR_CLASS_*` constants per ARCHITECTURE.md §7.2
   (`1u << 0` through `1u << 22`), with the documented flag names and comments
 - Bits 23-31 reserved -- add a comment
+  (All completed in Phase 1 skeleton; verified in Phase 5.1/5.2)
 
 ### Tests for Phase 5
 
@@ -677,13 +678,13 @@ File: `tests/test_classify.c`
 
 ### Phase 5 Completion Criteria
 
-- [ ] All test_classify.c tests pass on all four targets
-- [ ] `test_classify_global_exclusivity` passes
-- [ ] `test_classify_multi_flag_2001_sub_blocks` passes
-- [ ] Terminated entries classified correctly
-- [ ] Valgrind clean; ASan/UBSan clean on every target whose toolchain
+- [x] All test_classify.c tests pass on all four targets
+- [x] `test_classify_global_exclusivity` passes
+- [x] `test_classify_multi_flag_2001_sub_blocks` passes
+- [x] Terminated entries classified correctly
+- [x] Valgrind clean; ASan/UBSan clean on every target whose toolchain
       supports them
-- [ ] Memory discipline check: no `malloc`/`free` in `src/cidr_classify.c`
+- [x] Memory discipline check: no `malloc`/`free` in `src/cidr_classify.c`
 
 ---
 

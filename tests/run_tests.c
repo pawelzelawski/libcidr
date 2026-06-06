@@ -128,6 +128,23 @@ extern int test_concurrent_bulk_sort_independent(void);
 extern int test_concurrent_bulk_aggregate_independent(void);
 #endif
 
+/*
+ * test_classify.c -- Phase 5: address classification tests.
+ * See ARCHITECTURE.md §7 for the classification specification.
+ */
+extern int test_classify_each_ipv4_block(void);
+extern int test_classify_each_ipv6_block(void);
+extern int test_classify_global_exclusivity(void);
+extern int test_classify_global_public_unicast(void);
+extern int test_classify_multi_flag_2001_sub_blocks(void);
+extern int test_classify_terminated_192_88_99(void);
+extern int test_classify_terminated_2001_10(void);
+extern int test_classify_multicast_ipv4(void);
+extern int test_classify_multicast_ipv6(void);
+extern int test_classify_boundary_first_last(void);
+extern int test_classify_null(void);
+extern int test_classify_unspec(void);
+
 int tests_run = 0;
 int tests_passed = 0;
 
@@ -290,6 +307,25 @@ main(void)
 	RUN("test_concurrent_bulk_aggregate_independent",
 	    test_concurrent_bulk_aggregate_independent);
 #endif
+
+	RUN("test_classify_each_ipv4_block", test_classify_each_ipv4_block);
+	RUN("test_classify_each_ipv6_block", test_classify_each_ipv6_block);
+	RUN("test_classify_global_exclusivity",
+	    test_classify_global_exclusivity);
+	RUN("test_classify_global_public_unicast",
+	    test_classify_global_public_unicast);
+	RUN("test_classify_multi_flag_2001_sub_blocks",
+	    test_classify_multi_flag_2001_sub_blocks);
+	RUN("test_classify_terminated_192_88_99",
+	    test_classify_terminated_192_88_99);
+	RUN("test_classify_terminated_2001_10",
+	    test_classify_terminated_2001_10);
+	RUN("test_classify_multicast_ipv4", test_classify_multicast_ipv4);
+	RUN("test_classify_multicast_ipv6", test_classify_multicast_ipv6);
+	RUN("test_classify_boundary_first_last",
+	    test_classify_boundary_first_last);
+	RUN("test_classify_null", test_classify_null);
+	RUN("test_classify_unspec", test_classify_unspec);
 
 	fprintf(stderr, "%d/%d tests passed\n", tests_passed, tests_run);
 	return (tests_run == tests_passed) ? 0 : 1;

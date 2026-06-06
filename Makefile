@@ -82,7 +82,7 @@ LIB_SRCS = src/cidr_addr.c					\
            src/cidr_index.c
 
 TEST_SRCS = tests/run_tests.c tests/test_addr.c tests/test_prefix.c \
-            tests/test_bulk.c
+            tests/test_bulk.c tests/test_classify.c
 TEST_SRCS_TSAN = $(TEST_SRCS) tests/test_tsan.c
 
 THREAD_FLAGS = -pthread
@@ -258,7 +258,6 @@ lint:
 	             --suppress=checkersReport			\
 	             --suppress=staticFunction			\
 	             --suppress=unmatchedSuppression		\
-	             --suppress=unusedStructMember		\
 	             --check-level=exhaustive			\
 	             src/ python/;				\
 	else \
