@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 4 -- Bulk Engine (COMPLETE)
-**Next Task**: Phase 5.1 -- Classification table
+**Current Phase**: Phase 5 -- Address Classification (IN PROGRESS)
+**Next Task**: Phase 5.2 -- cidr_addr_classify()
 
 ### Phase Summary
 
@@ -13,7 +13,7 @@
 | 2 | Address Arithmetic Engine | COMPLETE | 33/33 | Parse, format, extraction, comparison |
 | 3 | Prefix Construction and Arithmetic | COMPLETE | 67/67 | Parse, arithmetic ops, subnet iterator, comparison |
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
-| 5 | Address Classification | PENDING | 0/0 | IANA table, classify function |
+| 5 | Address Classification | IN PROGRESS | 0/0 | IANA table, classify function |
 | 6 | Patricia Trie Index | PENDING | 0/0 | LC-trie build and lookup |
 | 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
@@ -614,7 +614,7 @@ Phase 3 arithmetic, but the public function signature requires only Phase 2.)
 
 ### Tasks
 
-**5.1 -- Classification table**
+**5.1 -- Classification table** ✓ DONE
 - Define the compile-time classification table in `src/cidr_classify.c`
 - Table entries contain: address family, network address bytes, prefix
   length, and bitmask of applicable flags
