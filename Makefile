@@ -207,7 +207,7 @@ $(PY_DIR)/_libcidr_ext.o: $(PY_DIR)/_libcidr_ext.c include/libcidr.h
 	$(CC) $(CFLAGS_PYEXT) -c $< -o $@
 
 $(PY_DIR)/$(PYEXT_ABI3): $(PY_DIR)/_libcidr_ext.o $(LIB_RELEASE)
-	$(CC) -shared $^ -o $@
+	$(CC) -shared $(PY_DIR)/_libcidr_ext.o $(LIB_RELEASE) -o $@
 
 python-check-abi:
 	@echo "Extension filename: $(PYEXT_ABI3)"

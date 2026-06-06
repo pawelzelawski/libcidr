@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 7 -- Python Binding Layer (PENDING)
-**Next Task**: Phase 7.1 -- Module skeleton and exception hierarchy
+**Current Phase**: Phase 7 -- Python Binding Layer (IN PROGRESS)
+**Next Task**: Phase 7.2 -- IPv4Address and IPv6Address types
 
 ### Phase Summary
 
@@ -15,7 +15,7 @@
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
-| 7 | Python Binding Layer | PENDING | 0/0 | CPython stable ABI extension |
+| 7 | Python Binding Layer | IN PROGRESS | 0/0 | CPython stable ABI extension |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
 ### Quality Milestones
@@ -851,7 +851,7 @@ no partial binding makes sense before all C components are tested and stable.
 
 ### Tasks
 
-**7.1 -- Module skeleton and exception hierarchy**
+**7.1 -- Module skeleton and exception hierarchy** ✓ DONE
 - Implement `PyMODINIT_FUNC PyInit_libcidr(void)` in
   `python/_libcidr_ext.c`
 - Register the module with `PyModuleDef`
