@@ -10,9 +10,10 @@
  *   - Module-level constants (ARCHITECTURE.md §7.2, §8.1)
  *   - cidr_set_python_error() helper (CODING_STANDARDS.md §6.4)
  *   - IPv4Address, IPv6Address types (ARCHITECTURE.md §8.6)
- *
- * Later phases add:
- *   7.6 - memoryview entry point
+ *   - IPv4Network, IPv6Network types (ARCHITECTURE.md §8.7)
+ *   - SubnetIterator type (ARCHITECTURE.md §8.9)
+ *   - Bulk entry points (ARCHITECTURE.md §8.8)
+ *   - bulk_contains_packed memoryview entry point (ARCHITECTURE.md §8.8.2)
  */
 
 #define Py_LIMITED_API 0x030B0000
@@ -3008,6 +3009,210 @@ error:
 }
 
 /*
+ * libcidr.bulk_contains_packed(mv, prefixes, family) -> list
+ *
+ * Accept a memoryview of packed binary address data, a list/tuple of
+ * network objects, and an explicit family constant (AF_INET or AF_INET6).
+ * The memoryview must be 1-dimensional, C-contiguous, with element size
+ * 4 bytes for AF_INET or 16 bytes for AF_INET6.
+ *
+ * Returns a list of int match indices: result[i] is the index of the
+ * first matching prefix for address i, or -1 if no prefix matches.
+ *
+ * Raises InvalidArgumentError for:
+ *   - multi-dimensional memoryview
+ *   - non-contiguous memoryview
+ *   - element size not matching family
+ *   - invalid family constant
+ * Raises FamilyError if the prefix family does not match the requested
+ * address family.
+ *
+ * Backed by cidr_bulk_contains(). See ARCHITECTURE.md §8.8.2.
+ */
+static PyObject *
+libcidr_bulk_contains_packed(PyObject *self, PyObject *args)
+{
+	PyObject *mv_obj;
+	PyObject *prefixes_obj;
+	int family;
+	Py_buffer view;
+	cidr_addr_t *addrs = NULL;
+	cidr_prefix_t *prefixes = NULL;
+	size_t addr_count;
+	size_t prefix_count;
+	cidr_family_t prefix_fam;
+	ssize_t *matches = NULL;
+	cidr_err_t rc;
+	PyObject *result = NULL;
+	size_t want;
+
+	(void)self;
+
+	if (!PyArg_ParseTuple(args, "OOi", &mv_obj, &prefixes_obj, &family))
+		return NULL;
+
+	if (family != CIDR_AF_INET && family != CIDR_AF_INET6) {
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "family must be AF_INET or AF_INET6");
+		return NULL;
+	}
+
+	/*
+	 * SAFETY: PyObject_GetBuffer acquires a shared reference to the
+	 * underlying buffer. PyBuffer_Release must be called on every
+	 * error path after acquisition to avoid leaking the buffer lock.
+	 * See ARCHITECTURE.md §8.8.2.
+	 *
+	 * We request ND | STRIDES (without C_CONTIGUOUS) so that we can
+	 * check contiguity ourselves and raise InvalidArgumentError
+	 * instead of a raw BufferError on failure.
+	 */
+	if (PyObject_GetBuffer(mv_obj, &view, PyBUF_ND | PyBUF_STRIDES) < 0)
+		return NULL;
+
+	/* Validate: 1-dimensional only. */
+	if (view.ndim != 1) {
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "memoryview must be 1-dimensional");
+		PyBuffer_Release(&view);
+		return NULL;
+	}
+
+	/* Compute address count first to handle empty views. */
+	addr_count = (size_t)(view.len / view.itemsize);
+
+	/* Validate element size matches the requested family
+	 * (skip check for empty memoryviews). */
+	want = (family == CIDR_AF_INET) ? 4 : 16;
+	if (addr_count > 0 && (size_t)view.itemsize != want) {
+		PyErr_Format(libcidr_InvalidArgumentError,
+		             "element size must be %zu bytes for %s", want,
+		             family == CIDR_AF_INET ? "IPv4" : "IPv6");
+		PyBuffer_Release(&view);
+		return NULL;
+	}
+
+	/*
+	 * Validate C-contiguity for 1D views:
+	 * - NULL strides means simple contiguous buffer
+	 * - strides[0] == itemsize means packed contiguous
+	 * - suboffsets != NULL means indirect (not simple)
+	 * See ARCHITECTURE.md §8.8.2.
+	 */
+	if (view.suboffsets != NULL ||
+	    (view.strides != NULL && view.strides[0] != view.itemsize)) {
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "memoryview must be C-contiguous");
+		PyBuffer_Release(&view);
+		return NULL;
+	}
+
+	/* Extract prefixes using the existing helper. */
+	prefixes =
+	    bulk_extract_prefixes(prefixes_obj, &prefix_count, &prefix_fam);
+	if (prefixes == NULL) {
+		PyBuffer_Release(&view);
+		return NULL;
+	}
+
+	/* Validate prefix family matches the requested address family. */
+	if (prefix_count > 0 && prefix_fam != (cidr_family_t)family) {
+		PyErr_SetString(libcidr_FamilyError,
+		                "prefix family does not match "
+		                "requested address family");
+		PyBuffer_Release(&view);
+		free(prefixes);
+		return NULL;
+	}
+
+	/*
+	 * Allocate and fill the cidr_addr_t array from the memoryview
+	 * buffer. Tight C loop: no Python object creation per address.
+	 * Owned by this function until the result list is built.
+	 * See ARCHITECTURE.md §8.8.2.
+	 */
+	if (addr_count > 0) {
+		const uint8_t *buf = (const uint8_t *)view.buf;
+		size_t elem_bytes = want;
+
+		addrs = (cidr_addr_t *)malloc(addr_count * sizeof(cidr_addr_t));
+		if (addrs == NULL) {
+			PyErr_NoMemory();
+			PyBuffer_Release(&view);
+			free(prefixes);
+			return NULL;
+		}
+		for (size_t i = 0; i < addr_count; i++) {
+			void *dst;
+
+			addrs[i].family = (cidr_family_t)family;
+			dst = (family == CIDR_AF_INET)
+			          ? (void *)addrs[i].addr.v4
+			          : (void *)addrs[i].addr.v6;
+			// NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
+			memcpy(dst, buf + i * elem_bytes, elem_bytes);
+		}
+	}
+
+	matches = (ssize_t *)malloc(addr_count * sizeof(ssize_t));
+	if (matches == NULL && addr_count > 0) {
+		PyErr_NoMemory();
+		PyBuffer_Release(&view);
+		free(addrs);
+		free(prefixes);
+		return NULL;
+	}
+
+	rc = cidr_bulk_contains(addrs, addr_count, prefixes, prefix_count,
+	                        matches, NULL);
+	if (rc != CIDR_OK) {
+		cidr_set_python_error(rc, NULL);
+		PyBuffer_Release(&view);
+		free(addrs);
+		free(prefixes);
+		free(matches);
+		return NULL;
+	}
+
+	/* Build the result list from the matches array. */
+	result = PyList_New((Py_ssize_t)addr_count);
+	if (result == NULL) {
+		PyBuffer_Release(&view);
+		free(addrs);
+		free(prefixes);
+		free(matches);
+		return NULL;
+	}
+	for (size_t i = 0; i < addr_count; i++) {
+		PyObject *item = PyLong_FromSsize_t(matches[i]);
+
+		if (item == NULL) {
+			Py_DECREF(result);
+			PyBuffer_Release(&view);
+			free(addrs);
+			free(prefixes);
+			free(matches);
+			return NULL;
+		}
+		/* PyList_SetItem steals the item reference. */
+		if (PyList_SetItem(result, (Py_ssize_t)i, item) < 0) {
+			Py_DECREF(result);
+			PyBuffer_Release(&view);
+			free(addrs);
+			free(prefixes);
+			free(matches);
+			return NULL;
+		}
+	}
+
+	PyBuffer_Release(&view);
+	free(addrs);
+	free(prefixes);
+	free(matches);
+	return result;
+}
+
+/*
  * Module method table.
  */
 static PyMethodDef libcidr_methods[] = {
@@ -3029,6 +3234,12 @@ static PyMethodDef libcidr_methods[] = {
      "Sort a list of networks in the specified order "
      "(SORT_NETWORK_ASC or SORT_PFXLEN_DESC). Returns a new list; "
      "the input is not modified."},
+    {"bulk_contains_packed", libcidr_bulk_contains_packed, METH_VARARGS,
+     "bulk_contains_packed(mv, prefixes, family) -> list\n\n"
+     "Accept a memoryview of packed binary address data and return "
+     "match indices against a prefix list. The memoryview must be "
+     "1-dimensional, C-contiguous, with element size 4 (AF_INET) "
+     "or 16 (AF_INET6)."},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef libcidr_module = {

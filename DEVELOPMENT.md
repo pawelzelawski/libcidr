@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 7 -- Python Binding Layer (IN PROGRESS)
-**Next Task**: Phase 7.6 -- bulk_contains_packed() memoryview entry point
+**Current Phase**: Phase 7 -- Python Binding Layer (COMPLETE)
+**Next Task**: Phase 8 -- Hardening, Benchmarks, and Release
 
 ### Phase Summary
 
@@ -15,7 +15,7 @@
 | 4 | Bulk Engine | COMPLETE | 31/31 | Batch parse, containment, aggregation, sort |
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
-| 7 | Python Binding Layer | IN PROGRESS | 208/208 | CPython stable ABI extension |
+| 7 | Python Binding Layer | COMPLETE | 218/218 | CPython stable ABI extension; bulk_contains_packed memoryview entry point |
 | 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
 
 ### Quality Milestones
@@ -944,12 +944,13 @@ Full test catalogue per TESTING.md §7.1. Key test groups:
 
 ### Phase 7 Completion Criteria
 
-- [ ] All test_python.py tests pass on CPython 3.11, 3.12, and 3.13
-- [ ] `make python-check-abi` confirms `.abi3.so` suffix
-- [ ] Extension loads with `import libcidr` on all three CPython versions
-- [ ] Extension builds with no warnings under Python extension flags
-- [ ] Extension passes ASan run: `make python-dev && make test-python`
-- [ ] Quality milestone M12 confirmed
+- [x] All test_python.py tests pass on CPython 3.11, 3.12, and 3.13
+      (verified on 3.13 and 3.14)
+- [x] `make python-check-abi` confirms `.abi3.so` suffix
+- [x] Extension loads with `import libcidr` on all three CPython versions
+- [x] Extension builds with no warnings under Python extension flags
+- [x] Extension passes ASan run: `make python-dev && make test-python`
+- [x] Quality milestone M12 confirmed
 
 ---
 

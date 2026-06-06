@@ -1344,5 +1344,124 @@ class TestBulkFunctions(unittest.TestCase):
             libcidr.bulk_sort(nets, libcidr.SORT_NETWORK_ASC)
 
 
+class TestBulkContainsPacked(unittest.TestCase):
+    """Verify bulk_contains_packed memoryview entry point per
+    ARCHITECTURE.md §8.8.2."""
+
+    def _packed_mv(self, addr_strs, addr_size, pack_fn):
+        """Build a (n,) memoryview of packed addresses via ctypes.
+
+        Creates a ctypes array of structs, each addr_size bytes, so
+        the memoryview has itemsize == addr_size without requiring
+        cast() to multi-byte formats unsupported on Python 3.14+.
+        """
+        import ctypes
+        n = len(addr_strs)
+        if n == 0:
+            return memoryview(b'')
+        FieldType = ctypes.c_uint8 * addr_size
+        class AddrStruct(ctypes.Structure):
+            _fields_ = [("data", FieldType)]
+        ArrayType = AddrStruct * n
+        raw = ArrayType()
+        for i, s in enumerate(addr_strs):
+            packed = pack_fn(s)
+            for j in range(addr_size):
+                raw[i].data[j] = packed[j]
+        return memoryview(raw)
+
+    def _ipv4_mv(self, *addr_strs):
+        """Build a (n,) memoryview of 4-byte packed IPv4 addresses."""
+        return self._packed_mv(addr_strs, 4,
+            lambda s: bytes(int(x) for x in s.split('.')))
+
+    def _ipv6_mv(self, *addr_strs):
+        """Build a (n,) memoryview of 16-byte packed IPv6 addresses."""
+        import ipaddress
+        return self._packed_mv(addr_strs, 16,
+            lambda s: ipaddress.IPv6Address(s).packed)
+
+    def test_bulk_contains_packed_ipv4(self):
+        prefixes = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        mv = self._ipv4_mv('10.0.0.1', '192.168.1.1')
+        result = libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+        self.assertEqual(result, [0, 1])
+
+    def test_bulk_contains_packed_ipv6(self):
+        prefixes = [
+            libcidr.IPv6Network('2001:db8::/32'),
+            libcidr.IPv6Network('fe80::/10'),
+        ]
+        mv = self._ipv6_mv('2001:db8::1', 'fe80::1', '::1')
+        result = libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET6)
+        self.assertEqual(result, [0, 1, -1])
+
+    def test_bulk_contains_packed_no_match(self):
+        prefixes = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        mv = self._ipv4_mv('1.2.3.4', '4.3.2.1')
+        result = libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+        self.assertEqual(result, [-1, -1])
+
+    def test_bulk_contains_packed_wrong_element_size(self):
+        prefixes = [libcidr.IPv4Network('0.0.0.0/0')]
+        buf = bytearray(b'\x00\x00\x00\x01\x00\x00\x00\x02')
+        mv = memoryview(buf).cast('B')  # itemsize=1
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+
+    def test_bulk_contains_packed_non_contiguous(self):
+        import ctypes
+        prefixes = [libcidr.IPv4Network('0.0.0.0/0')]
+        # c_uint32 array (itemsize=4) sliced with step creates strided view
+        buf = (ctypes.c_uint32 * 8)()
+        mv_sliced = memoryview(buf)[::2]
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.bulk_contains_packed(
+                mv_sliced, prefixes, libcidr.AF_INET)
+
+    def test_bulk_contains_packed_multi_dimensional(self):
+        import ctypes
+        prefixes = [libcidr.IPv4Network('0.0.0.0/0')]
+        # 2D ctypes array
+        buf = (ctypes.c_uint8 * 4 * 4)()
+        mv = memoryview(buf)
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+
+    def test_bulk_contains_packed_empty_addresses(self):
+        import ctypes
+        prefixes = [libcidr.IPv4Network('10.0.0.0/8')]
+        # Create a 4-byte struct type, then zero-length array
+        # so the memoryview has itemsize=4 and len=0.
+        class V4(ctypes.Structure):
+            _fields_ = [("data", ctypes.c_uint8 * 4)]
+        mv = memoryview((V4 * 0)())
+        result = libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+        self.assertEqual(result, [])
+
+    def test_bulk_contains_packed_empty_prefixes(self):
+        mv = self._ipv4_mv('10.0.0.1', '192.168.1.1')
+        result = libcidr.bulk_contains_packed(mv, [], libcidr.AF_INET)
+        self.assertEqual(result, [-1, -1])
+
+    def test_bulk_contains_packed_cross_family(self):
+        prefixes = [libcidr.IPv6Network('2001:db8::/32')]
+        mv = self._ipv4_mv('10.0.0.1')
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.bulk_contains_packed(mv, prefixes, libcidr.AF_INET)
+
+    def test_bulk_contains_packed_invalid_family(self):
+        prefixes = [libcidr.IPv4Network('0.0.0.0/0')]
+        mv = self._ipv4_mv('10.0.0.1')
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.bulk_contains_packed(mv, prefixes, 99)
+
+
 if __name__ == '__main__':
     unittest.main()
