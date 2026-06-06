@@ -154,6 +154,7 @@ extern int test_index_create_null(void);
 extern int test_index_create_unspec_family(void);
 extern int test_index_create_mixed_family(void);
 extern int test_index_create_count_overflow(void);
+extern int test_index_create_copies_prefix_array(void);
 extern int test_index_destroy_null_safe(void);
 extern int test_index_lookup_null_index(void);
 extern int test_index_lookup_null_matches_nonzero_count(void);
@@ -358,6 +359,8 @@ main(void)
 	RUN("test_index_create_mixed_family", test_index_create_mixed_family);
 	RUN("test_index_create_count_overflow",
 	    test_index_create_count_overflow);
+	RUN("test_index_create_copies_prefix_array",
+	    test_index_create_copies_prefix_array);
 	RUN("test_index_destroy_null_safe", test_index_destroy_null_safe);
 	RUN("test_index_lookup_null_index", test_index_lookup_null_index);
 	RUN("test_index_lookup_null_matches_nonzero_count",

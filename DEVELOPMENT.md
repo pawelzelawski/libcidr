@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 6 -- Patricia Trie Index (IN PROGRESS)
-**Next Task**: Phase 6.4 -- `cidr_index_create()`
+**Next Task**: Phase 6.5 -- `cidr_index_lookup()`
 
 ### Phase Summary
 
@@ -746,7 +746,7 @@ the prefix array using the Phase 4 radix sort engine.)
 - Document the DP with `/* SAFETY: */` and `/* NOTE: */` comments at each
   step explaining the invariants relied upon
 
-**6.4 -- `cidr_index_create()`**
+**6.4 -- `cidr_index_create()`** ✓ DONE
 - Implement per ARCHITECTURE.md §6.2 using `goto cleanup` for all
   multi-allocation paths per CODING_STANDARDS.md §2.3
 - Validate all error conditions before any allocation:

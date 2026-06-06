@@ -188,6 +188,37 @@ slot_pattern_bit(uint32_t slot, uint8_t branch, uint8_t rel_bit_pos)
 }
 
 /*
+ * patricia_node_alloc - reserve one live Patricia node slot.
+ *
+ * Enforces the ARCHITECTURE.md §6.2 node-count limit during build rather than
+ * relying only on the caller's prefix count. UINT32_MAX is reserved as the
+ * "no prefix" sentinel, so the live Patricia node count must never exceed
+ * UINT32_MAX - 1.
+ *
+ * next_free:  next unused node index in the caller-provided arena
+ * node_limit: maximum representable live node count (UINT32_MAX - 1)
+ * out_idx:    receives the reserved node index on success
+ *
+ * Returns true when one slot was reserved. Returns false when the next live
+ * node would exceed node_limit.
+ */
+static bool
+patricia_node_alloc(uint32_t *next_free, size_t node_limit, uint32_t *out_idx)
+{
+	/*
+	 * SAFETY: UINT32_MAX is reserved throughout Phase 6 as the sentinel for
+	 * "no prefix"/"no child". Stop before next_free can advance past
+	 * UINT32_MAX - 1. See ARCHITECTURE.md §6.2.
+	 */
+	if ((size_t)*next_free >= node_limit)
+		return false;
+
+	*out_idx = *next_free;
+	*next_free += 1;
+	return true;
+}
+
+/*
  * patricia_subtree_build - recursively build a path-compressed binary trie.
  *
  * Builds one live Patricia subtree for the sorted prefix range [start, end).
@@ -201,6 +232,8 @@ slot_pattern_bit(uint32_t slot, uint8_t branch, uint8_t rel_bit_pos)
  * addr_len:     address byte width (4 or 16)
  * nodes:        caller-allocated Patricia node arena
  * next_free:    next free slot in nodes; updated on each live node creation
+ * node_limit:   maximum representable live Patricia node count
+ * overflowed:   set true when the next live node would exceed node_limit
  *
  * Returns the index of the live subtree root, or CIDR_PAT_NONE when the range
  * is empty.
@@ -211,7 +244,8 @@ slot_pattern_bit(uint32_t slot, uint8_t branch, uint8_t rel_bit_pos)
 static uint32_t
 patricia_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
                        int bit_pos, int key_bits, size_t addr_len,
-                       cidr_pat_node_t *nodes, uint32_t *next_free)
+                       cidr_pat_node_t *nodes, uint32_t *next_free,
+                       size_t node_limit, bool *overflowed)
 {
 	uint32_t node_idx, best_prefix_idx;
 	bool has_extending, diverges;
@@ -222,8 +256,10 @@ patricia_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 	if (start == end)
 		return CIDR_PAT_NONE;
 
-	node_idx = *next_free;
-	*next_free += 1;
+	if (!patricia_node_alloc(next_free, node_limit, &node_idx)) {
+		*overflowed = true;
+		return CIDR_PAT_NONE;
+	}
 
 	node = &nodes[node_idx];
 	node->left = CIDR_PAT_NONE;
@@ -314,12 +350,16 @@ patricia_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		}
 	}
 
-	node->left =
-	    patricia_subtree_build(sorted, ext_start, pivot, split_bit + 1,
-	                           key_bits, addr_len, nodes, next_free);
-	node->right =
-	    patricia_subtree_build(sorted, pivot, end, split_bit + 1, key_bits,
-	                           addr_len, nodes, next_free);
+	node->left = patricia_subtree_build(
+	    sorted, ext_start, pivot, split_bit + 1, key_bits, addr_len, nodes,
+	    next_free, node_limit, overflowed);
+	if (*overflowed)
+		return CIDR_PAT_NONE;
+	node->right = patricia_subtree_build(sorted, pivot, end, split_bit + 1,
+	                                     key_bits, addr_len, nodes,
+	                                     next_free, node_limit, overflowed);
+	if (*overflowed)
+		return CIDR_PAT_NONE;
 	return node_idx;
 }
 
@@ -737,6 +777,7 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 	int key_bits;
 	uint32_t pat_root, pat_count, packed_next;
 	cidr_err_t rc;
+	bool pat_overflowed;
 
 	idx = NULL;
 	copy = NULL;
@@ -815,9 +856,11 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 		goto cleanup;
 
 	pat_count = 0;
+	pat_overflowed = false;
 	pat_root = patricia_subtree_build(copy, 0, count, 0, key_bits, addr_len,
-	                                  pat_nodes, &pat_count);
-	if (pat_root == CIDR_PAT_NONE) {
+	                                  pat_nodes, &pat_count, node_limit,
+	                                  &pat_overflowed);
+	if (pat_overflowed || pat_root == CIDR_PAT_NONE) {
 		rc = CIDR_ERR_INVAL;
 		goto cleanup;
 	}

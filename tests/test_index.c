@@ -154,6 +154,54 @@ test_index_create_count_overflow(void)
 }
 
 /*
+ * test_index_create_copies_prefix_array - index build does not retain caller
+ * storage.
+ *
+ * After cidr_index_create() returns, the caller may mutate or free the input
+ * array without affecting later lookups. This exercises the copy-before-sort
+ * contract from ARCHITECTURE.md §6.2.
+ */
+int
+test_index_create_copies_prefix_array(void)
+{
+	cidr_prefix_t prefixes[2];
+	cidr_addr_t addr;
+	ssize_t match;
+	cidr_index_t *index = NULL;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("192.168.0.0/16", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	if (cidr_index_create(prefixes, 2, &index) != CIDR_OK)
+		return 1;
+
+	/*
+	 * Overwrite the caller-owned array after build. If the index retained
+	 * aliases into this storage, the later lookup would stop matching /8.
+	 */
+	if (cidr_prefix_parse("203.0.113.0/24", &prefixes[0]) != CIDR_OK)
+		goto fail;
+	if (cidr_prefix_parse("198.51.100.0/24", &prefixes[1]) != CIDR_OK)
+		goto fail;
+
+	if (cidr_addr_parse("10.1.2.3", &addr) != CIDR_OK)
+		goto fail;
+	if (cidr_index_lookup(index, &addr, 1, &match, NULL) != CIDR_OK)
+		goto fail;
+	if (match != 0)
+		goto fail;
+
+	cidr_index_destroy(index);
+	return 0;
+
+fail:
+	cidr_index_destroy(index);
+	return 1;
+}
+
+/*
  * test_index_basic_lookup - single prefix; address inside returns 0,
  * address outside returns -1.
  *
