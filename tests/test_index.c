@@ -349,6 +349,91 @@ fail:
 }
 
 /*
+ * test_index_sparse_slot_semantics - verify longest-prefix fallback across
+ * a sparse descendant layout.
+ *
+ * Setup:
+ * - 10.0.0.0/8      (index 0)
+ * - 10.128.0.0/9    (index 1)
+ * - 10.192.0.0/10   (index 2)
+ *
+ * This exercises a subtree where some descendants are live and others are
+ * dead. Results are checked against cidr_bulk_contains() on the same prefixes
+ * sorted by CIDR_SORT_PFXLEN_DESC, which is the documented LPM comparison
+ * pattern from TESTING.md §2.5.
+ *
+ * See ARCHITECTURE.md §6.4.2 for explicit dead-slot materialization and
+ * ARCHITECTURE.md §6.3 for interior-node longest-prefix semantics.
+ */
+int
+test_index_sparse_slot_semantics(void)
+{
+	cidr_prefix_t prefixes[3];
+	cidr_prefix_t sorted[3];
+	cidr_addr_t addrs[4];
+	ssize_t idx_matches[4];
+	ssize_t bulk_matches[4];
+	cidr_index_t *index = NULL;
+
+	if (cidr_prefix_parse("10.0.0.0/8", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.128.0.0/9", &prefixes[1]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("10.192.0.0/10", &prefixes[2]) != CIDR_OK)
+		return 1;
+
+	if (cidr_index_create(prefixes, 3, &index) != CIDR_OK)
+		return 1;
+
+	if (cidr_addr_parse("10.64.0.1", &addrs[0]) != CIDR_OK)
+		goto fail;
+	if (cidr_addr_parse("10.160.0.1", &addrs[1]) != CIDR_OK)
+		goto fail;
+	if (cidr_addr_parse("10.192.0.1", &addrs[2]) != CIDR_OK)
+		goto fail;
+	if (cidr_addr_parse("10.255.0.1", &addrs[3]) != CIDR_OK)
+		goto fail;
+
+	memcpy(sorted, prefixes, sizeof(prefixes));
+	if (cidr_bulk_sort(sorted, 3, CIDR_SORT_PFXLEN_DESC) != CIDR_OK)
+		goto fail;
+
+	if (cidr_bulk_contains(addrs, 4, sorted, 3, bulk_matches, NULL) !=
+	    CIDR_OK)
+		goto fail;
+
+	if (cidr_index_lookup(index, addrs, 4, idx_matches, NULL) != CIDR_OK)
+		goto fail;
+
+	for (int i = 0; i < 4; i++) {
+		const cidr_prefix_t *sp, *op;
+
+		if (idx_matches[i] == -1) {
+			if (bulk_matches[i] != -1)
+				goto fail;
+			continue;
+		}
+
+		if (bulk_matches[i] == -1)
+			goto fail;
+
+		sp = &sorted[bulk_matches[i]];
+		op = &prefixes[idx_matches[i]];
+		if (sp->pfxlen != op->pfxlen)
+			goto fail;
+		if (memcmp(&sp->addr.addr, &op->addr.addr, 4) != 0)
+			goto fail;
+	}
+
+	cidr_index_destroy(index);
+	return 0;
+
+fail:
+	cidr_index_destroy(index);
+	return 1;
+}
+
+/*
  * test_index_duplicate_lower_index_wins - two identical prefixes;
  * the lower original input index is always returned.
  *

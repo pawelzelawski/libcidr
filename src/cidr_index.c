@@ -8,9 +8,9 @@
  * cidr_index_lookup(): longest-prefix match for each address in
  *   caller-provided array.
  *
- * Phase 6.2: basic Patricia trie (binary, path-compressed) construction
- * with full lookup and destroy. Level compression is implemented in
- * Phase 6.3.
+ * Phase 6.3 implements level compression on top of the Phase 6.2
+ * path-compressed Patricia trie. The final packed array follows the
+ * precise DP recurrence in ARCHITECTURE.md §6.4.
  *
  * See ARCHITECTURE.md §6 for the Patricia trie specification.
  */
@@ -21,11 +21,43 @@
  *   grep -n "malloc\|free" src/
  * See CODING_STANDARDS.md §2.1 and ARCHITECTURE.md §1.4.
  */
+#ifdef CIDR_DEBUG
+#include <assert.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
 #include "../include/libcidr.h"
 #include "cidr_internal.h"
+
+#define CIDR_PAT_NONE UINT32_MAX
+#define CIDR_LCTRIE_MAX_BRANCH 8
+
+/*
+ * cidr_pat_node_t - internal Phase 6.2 Patricia trie node.
+ *
+ * The LC-trie build first constructs a basic path-compressed binary trie.
+ * The DP and packing passes then operate on this internal representation.
+ *
+ * left/right:    live child subtrees, or CIDR_PAT_NONE when absent
+ * prefix_idx:    sorted-prefix index stored exactly at bit_position, or
+ *                UINT32_MAX when no prefix terminates here
+ * repr_idx:      any sorted-prefix index from this subtree; used to read the
+ *                fixed path bits spanned by Patricia compression
+ * bit_position:  cumulative tested bits from the root in the conceptual
+ *                binary trie
+ * optimal_branch: DP-selected LC branch factor for this subtree; 0 = leaf
+ * dp_cost:       total packed node count for this subtree per the DP
+ */
+typedef struct {
+	uint32_t left;
+	uint32_t right;
+	uint32_t prefix_idx;
+	uint32_t repr_idx;
+	size_t dp_cost;
+	uint16_t bit_position;
+	uint8_t optimal_branch;
+} cidr_pat_node_t;
 
 /*
  * prefix_order_tag_set - stash a uint32_t tag in the addr.family field.
@@ -67,9 +99,8 @@ prefix_order_tag_get(const cidr_prefix_t *prefix)
  * (network byte order). For IPv4 (4 bytes), valid positions are 0-31.
  * For IPv6 (16 bytes), valid positions are 0-127.
  *
- * addr:    pointer to a valid cidr_addr_t (family CIDR_AF_INET or
- *          CIDR_AF_INET6)
- * bit_pos: bit position (0-based from MSB of byte 0)
+ * addr:     pointer to a valid cidr_addr_t
+ * bit_pos:  bit position (0-based from MSB of byte 0)
  * addr_len: address byte width (4 or 16)
  *
  * Returns 0 or 1.
@@ -99,8 +130,8 @@ trie_addr_bit(const cidr_addr_t *addr, int bit_pos, size_t addr_len)
  * Used during lookup to validate that a prefix stored at a trie node
  * actually covers the queried address.
  *
- * pfx:     pointer to a valid cidr_prefix_t
- * addr:    pointer to a valid cidr_addr_t (same family)
+ * pfx:      pointer to a valid cidr_prefix_t
+ * addr:     pointer to a valid cidr_addr_t (same family)
  * addr_len: address byte width (4 or 16)
  *
  * Returns true if the address is within the prefix.
@@ -142,83 +173,74 @@ trie_prefix_matches(const cidr_prefix_t *pfx, const cidr_addr_t *addr,
 }
 
 /*
- * trie_subtree_build - recursively build a binary Patricia trie subtree
- * at an explicit position in the node array.
+ * slot_pattern_bit - extract one bit from a packed child-slot index.
  *
- * Builds a subtree for prefixes in the range [start, end) of the sorted
- * array. All prefixes in this range share the same first (bit_pos) bits.
- * The `inherited` parameter is the best matching prefix from ancestors
- * (UINT32_MAX if none). The function writes the subtree root node at
- * `nodes[write_at]`. Child roots for a branch node are reserved at
- * contiguous indices `nodes[base]` and `nodes[base + 1]`, with deeper
- * descendants allocated after those root slots via `next_free`.
+ * slot:         slot number in the range 0 .. (2^branch - 1)
+ * branch:       number of tested bits in the slot pattern
+ * rel_bit_pos:  0-based position within the pattern
  *
- * Algorithm: find the first bit position >= bit_pos where either a
- * prefix ends or the remaining prefixes diverge. Create a node at that
- * position. If prefixes extend past the split point, split into left
- * (bit=0) and right (bit=1) subtrees and recurse.
- *
- * sorted:      sorted prefix array (by CIDR_SORT_NETWORK_ASC)
- * start, end:  range of prefixes for this subtree [start, end)
- * bit_pos:     current bit position (prefixes share bits [0, bit_pos))
- * key_bits:    total key width in bits (32 for IPv4, 128 for IPv6)
- * addr_len:    address byte width (4 or 16)
- * nodes:       pre-allocated node array
- * write_at:    index in nodes where this subtree's root is placed
- * next_free:   next unallocated node slot; updated as descendants are
- *              reserved during recursive construction
- * inherited:   best prefix_idx from ancestor chain (UINT32_MAX if none)
- *
- * NOTE: prefix_idx stored in each node is the SORTED position (index
- * into the sorted prefix array), NOT the original caller index. The
- * caller is responsible for mapping sorted->original via orig_indices.
- *
- * See ARCHITECTURE.md §6.3 for node layout and traversal semantics.
+ * Returns the bit at rel_bit_pos, MSB first.
  */
-static void
-trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
-                   int bit_pos, int key_bits, size_t addr_len,
-                   cidr_lctrie_node_t *nodes, uint32_t write_at,
-                   uint32_t *next_free, uint32_t inherited)
+static inline int
+slot_pattern_bit(uint32_t slot, uint8_t branch, uint8_t rel_bit_pos)
 {
-	uint32_t best_prefix_idx;
+	return (int)((slot >> (branch - rel_bit_pos - 1U)) & 1U);
+}
+
+/*
+ * patricia_subtree_build - recursively build a path-compressed binary trie.
+ *
+ * Builds one live Patricia subtree for the sorted prefix range [start, end).
+ * No dead child nodes are materialized here; missing descendants are encoded
+ * as CIDR_PAT_NONE and are expanded later by the LC packing pass.
+ *
+ * sorted:       prefix array sorted by CIDR_SORT_NETWORK_ASC
+ * start, end:   subtree range [start, end)
+ * bit_pos:      prefixes share bits [0, bit_pos)
+ * key_bits:     total key width in bits (32 or 128)
+ * addr_len:     address byte width (4 or 16)
+ * nodes:        caller-allocated Patricia node arena
+ * next_free:    next free slot in nodes; updated on each live node creation
+ *
+ * Returns the index of the live subtree root, or CIDR_PAT_NONE when the range
+ * is empty.
+ *
+ * See ARCHITECTURE.md §6.3 for the Phase 6.2 Patricia structure that the
+ * Phase 6.3 LC-trie DP consumes.
+ */
+static uint32_t
+patricia_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
+                       int bit_pos, int key_bits, size_t addr_len,
+                       cidr_pat_node_t *nodes, uint32_t *next_free)
+{
+	uint32_t node_idx, best_prefix_idx;
 	bool has_extending, diverges;
-	int split_bit, skip;
+	int split_bit;
 	size_t ext_start, pivot, i;
+	cidr_pat_node_t *node;
 
-	/*
-	 * No prefixes in this range: create a dead leaf.
-	 * The lookup will return the best match recorded from ancestors.
-	 */
-	if (start == end) {
-		nodes[write_at].prefix_idx = UINT32_MAX;
-		nodes[write_at].skip = 0;
-		nodes[write_at].branch = 0;
-		nodes[write_at].base = 0;
-		nodes[write_at].pad[0] = 0;
-		nodes[write_at].pad[1] = 0;
-		return;
-	}
+	if (start == end)
+		return CIDR_PAT_NONE;
 
-	/*
-	 * SAFETY: at most 2*original_count nodes are allocated.
-	 * The recursive build must not exceed this bound. Each subtree
-	 * uses at least 1 node. For a binary trie (branch=0 or 1),
-	 * total nodes <= 2n+1 where n is prefix count.
-	 * See ARCHITECTURE.md §6.3.
-	 */
+	node_idx = *next_free;
+	*next_free += 1;
 
-	/*
-	 * Find the first bit position >= bit_pos where either:
-	 *   a) a prefix ends (pfxlen == p), or
-	 *   b) prefixes with pfxlen > p diverge at bit p.
-	 */
+	node = &nodes[node_idx];
+	node->left = CIDR_PAT_NONE;
+	node->right = CIDR_PAT_NONE;
+	node->prefix_idx = UINT32_MAX;
+	node->repr_idx = (uint32_t)start;
+	node->dp_cost = 0;
+	node->bit_position = (uint16_t)bit_pos;
+	node->optimal_branch = 0;
+
 	split_bit = bit_pos;
 	best_prefix_idx = UINT32_MAX;
 	diverges = false;
 	for (int p = bit_pos; p < key_bits; p++) {
 		bool ends_here = false;
 		uint32_t end_idx = UINT32_MAX;
+		int first_val;
 
 		for (i = start; i < end; i++) {
 			if ((int)sorted[i].pfxlen == p) {
@@ -230,21 +252,17 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		}
 
 		diverges = false;
-		{
-			int first_val = -1;
-
-			for (i = start; i < end; i++) {
-				if ((int)sorted[i].pfxlen <= p)
-					continue;
-				if (first_val < 0) {
-					first_val = trie_addr_bit(
-					    &sorted[i].addr, p, addr_len);
-				} else if (trie_addr_bit(&sorted[i].addr, p,
-				                         addr_len) !=
-				           first_val) {
-					diverges = true;
-					break;
-				}
+		first_val = -1;
+		for (i = start; i < end; i++) {
+			if ((int)sorted[i].pfxlen <= p)
+				continue;
+			if (first_val < 0) {
+				first_val =
+				    trie_addr_bit(&sorted[i].addr, p, addr_len);
+			} else if (trie_addr_bit(&sorted[i].addr, p,
+			                         addr_len) != first_val) {
+				diverges = true;
+				break;
 			}
 		}
 
@@ -256,123 +274,369 @@ trie_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
 		}
 	}
 
-	/*
-	 * If no interesting position was found before key_bits, all
-	 * prefixes in this range are identical in all significant bits.
-	 * Create a leaf storing the prefix with the lowest sorted index.
-	 *
-	 * NOTE: This only triggers when the loop terminated without
-	 * finding any prefix-end or divergence point. If divergence was
-	 * found at split_bit with no prefix ending there, we continue
-	 * to the normal node creation below.
-	 */
 	if (split_bit == bit_pos && best_prefix_idx == UINT32_MAX &&
 	    !diverges) {
-		uint32_t min_idx = UINT32_MAX;
+		uint32_t min_idx;
 
-		for (i = start; i < end; i++) {
+		min_idx = (uint32_t)start;
+		for (i = start + 1; i < end; i++) {
 			if ((uint32_t)i < min_idx)
 				min_idx = (uint32_t)i;
 		}
-		best_prefix_idx = (min_idx != UINT32_MAX) ? min_idx : inherited;
 
-		nodes[write_at].prefix_idx = best_prefix_idx;
-		nodes[write_at].skip = 0;
-		nodes[write_at].branch = 0;
-		nodes[write_at].base = 0;
-		nodes[write_at].pad[0] = 0;
-		nodes[write_at].pad[1] = 0;
-		return;
+		node->bit_position = (uint16_t)key_bits;
+		node->prefix_idx = min_idx;
+		node->repr_idx = min_idx;
+		return node_idx;
 	}
 
-	/*
-	 * Determine if there are prefixes extending past split_bit.
-	 * If so, the node is an interior node (branch=1); otherwise a leaf.
-	 * NOTE: even if all extending prefixes agree on the split bit
-	 * (all go one way), we still set branch=1 because the lookup
-	 * must test this bit to distinguish between the extending path
-	 * and the dead-end path.
-	 */
+	node->bit_position = (uint16_t)split_bit;
+	node->prefix_idx = best_prefix_idx;
+
 	has_extending = false;
 	ext_start = end;
 	for (i = start; i < end; i++) {
 		if ((int)sorted[i].pfxlen > split_bit) {
 			has_extending = true;
-			if (i < ext_start)
-				ext_start = i;
+			ext_start = i;
 			break;
 		}
 	}
 
-	/*
-	 * SAFETY: skip must fit in uint8_t. For IPv4 max skip is 32,
-	 * for IPv6 max skip is 128. Both are <= 255.
-	 */
-	skip = split_bit - bit_pos;
+	if (!has_extending)
+		return node_idx;
 
-	/* Write the node. */
-	nodes[write_at].skip = (uint8_t)skip;
-	nodes[write_at].branch = has_extending ? 1 : 0;
-	nodes[write_at].prefix_idx =
-	    (best_prefix_idx != UINT32_MAX) ? best_prefix_idx : inherited;
-	nodes[write_at].pad[0] = 0;
-	nodes[write_at].pad[1] = 0;
-
-	if (!has_extending) {
-		nodes[write_at].base = 0;
-		return;
-	}
-
-	/*
-	 * Interior node: reserve 2 child-root slots contiguously, then
-	 * place descendants after them.
-	 *
-	 * See ARCHITECTURE.md §6.3: for branch=1, node has 2^1=2 children
-	 * at nodes[base] and nodes[base+1]. The traversal indexes directly
-	 * into those root slots, so deeper descendants must not displace the
-	 * right child root.
-	 */
-	nodes[write_at].base = *next_free;
-	*next_free += 2;
-
-	/*
-	 * Partition extending prefixes by bit value at split_bit.
-	 * Since the array is sorted by network address, prefixes with
-	 * bit=0 come before those with bit=1.
-	 *
-	 * NOTE: prefixes that ended at or before split_bit are not
-	 * included in the child ranges -- they have been handled at
-	 * this node (stored in prefix_idx or inherited).
-	 */
 	pivot = end;
 	for (i = ext_start; i < end; i++) {
-		if ((int)sorted[i].pfxlen <= split_bit)
-			continue;
 		if (trie_addr_bit(&sorted[i].addr, split_bit, addr_len) == 1) {
 			pivot = i;
 			break;
 		}
 	}
 
+	node->left =
+	    patricia_subtree_build(sorted, ext_start, pivot, split_bit + 1,
+	                           key_bits, addr_len, nodes, next_free);
+	node->right =
+	    patricia_subtree_build(sorted, pivot, end, split_bit + 1, key_bits,
+	                           addr_len, nodes, next_free);
+	return node_idx;
+}
+
+/*
+ * patricia_slot_target - resolve one LC child slot against a Patricia node.
+ *
+ * The slot pattern is matched against the conceptual binary trie starting at
+ * pat_idx.bit_position. Missing descendants yield CIDR_PAT_NONE. When the
+ * pattern ends in the middle of a Patricia-compressed path, the target is the
+ * Patricia node reached by that path; the packing pass will duplicate that
+ * subtree once per referencing slot per ARCHITECTURE.md §6.4.3. If a slot
+ * reaches a live Patricia node with a stored prefix but no more-specific child
+ * for the remaining pattern bits, the slot resolves to that current node so
+ * lookup can fall back to the nearest covering ancestor.
+ *
+ * nodes:       Patricia node arena
+ * pat_idx:     root of the current live subtree
+ * sorted:      sorted prefix array
+ * addr_len:    address width in bytes (4 or 16)
+ * branch:      candidate LC branch factor for pat_idx
+ * slot:        slot number in 0 .. (2^branch - 1)
+ *
+ * Returns the target Patricia node for this slot, or CIDR_PAT_NONE when the
+ * slot is dead.
+ */
+static uint32_t
+patricia_slot_target(const cidr_pat_node_t *nodes, uint32_t pat_idx,
+                     const cidr_prefix_t *sorted, size_t addr_len,
+                     uint8_t branch, uint32_t slot)
+{
+	const cidr_pat_node_t *node;
+	uint32_t child_idx;
+	int abs_bit_pos;
+	uint8_t rel_bit_pos;
+
+	node = &nodes[pat_idx];
+	if (node->left == CIDR_PAT_NONE && node->right == CIDR_PAT_NONE)
+		return CIDR_PAT_NONE;
+
+	child_idx =
+	    (slot_pattern_bit(slot, branch, 0) == 0) ? node->left : node->right;
+	if (child_idx == CIDR_PAT_NONE)
+		return CIDR_PAT_NONE;
+
+	abs_bit_pos = node->bit_position + 1;
+	rel_bit_pos = 1;
+
+	while (rel_bit_pos < branch) {
+		const cidr_pat_node_t *child;
+
+		child = &nodes[child_idx];
+
+		while (rel_bit_pos < branch &&
+		       abs_bit_pos < child->bit_position) {
+			int required_bit;
+
+			required_bit =
+			    trie_addr_bit(&sorted[child->repr_idx].addr,
+			                  abs_bit_pos, addr_len);
+			if (slot_pattern_bit(slot, branch, rel_bit_pos) !=
+			    required_bit)
+				return CIDR_PAT_NONE;
+			abs_bit_pos++;
+			rel_bit_pos++;
+		}
+
+		if (rel_bit_pos == branch)
+			break;
+
+		if (child->left == CIDR_PAT_NONE &&
+		    child->right == CIDR_PAT_NONE) {
+			if (child->prefix_idx != UINT32_MAX)
+				return child_idx;
+			return CIDR_PAT_NONE;
+		}
+
+		child_idx = (slot_pattern_bit(slot, branch, rel_bit_pos) == 0)
+		                ? child->left
+		                : child->right;
+		if (child_idx == CIDR_PAT_NONE) {
+			if (child->prefix_idx != UINT32_MAX)
+				return (uint32_t)(child - nodes);
+			return CIDR_PAT_NONE;
+		}
+
+		abs_bit_pos++;
+		rel_bit_pos++;
+	}
+
+	return child_idx;
+}
+
+/*
+ * patricia_dp_compute - bottom-up LC-trie cost DP over the Patricia tree.
+ *
+ * Computes DP(T) and the selected branching factor for the live subtree
+ * rooted at pat_idx. The cost function and tie-break rule are defined by
+ * ARCHITECTURE.md §6.4.
+ *
+ * nodes:      Patricia node arena
+ * pat_idx:    root of the live subtree to evaluate
+ * sorted:     sorted prefix array
+ * addr_len:   address width in bytes (4 or 16)
+ * key_bits:   address width in bits (32 or 128)
+ * node_limit: maximum representable packed node count (UINT32_MAX - 1)
+ *
+ * Returns true on success. Returns false when every candidate branch factor
+ * overflows node_limit.
+ */
+static bool
+patricia_dp_compute(cidr_pat_node_t *nodes, uint32_t pat_idx,
+                    const cidr_prefix_t *sorted, size_t addr_len, int key_bits,
+                    size_t node_limit)
+{
+	cidr_pat_node_t *node;
+	size_t best_cost;
+	uint8_t best_branch, max_branch;
+	bool best_valid;
+	int remaining_bits;
+
+	node = &nodes[pat_idx];
+
+	if (node->left != CIDR_PAT_NONE &&
+	    !patricia_dp_compute(nodes, node->left, sorted, addr_len, key_bits,
+	                         node_limit))
+		return false;
+	if (node->right != CIDR_PAT_NONE &&
+	    !patricia_dp_compute(nodes, node->right, sorted, addr_len, key_bits,
+	                         node_limit))
+		return false;
+
+	if (node->left == CIDR_PAT_NONE && node->right == CIDR_PAT_NONE) {
+		node->dp_cost = 1;
+		node->optimal_branch = 0;
+		return true;
+	}
+
+	remaining_bits = key_bits - node->bit_position;
+	max_branch = (remaining_bits < CIDR_LCTRIE_MAX_BRANCH)
+	                 ? (uint8_t)remaining_bits
+	                 : (uint8_t)CIDR_LCTRIE_MAX_BRANCH;
+
+	best_cost = 0;
+	best_branch = 1;
+	best_valid = false;
+
+	for (uint8_t branch = 1; branch <= max_branch; branch++) {
+		size_t cost;
+		uint32_t fanout;
+		bool valid;
+
+		cost = 1;
+		fanout = 1U << branch;
+		valid = true;
+
+		for (uint32_t slot = 0; slot < fanout; slot++) {
+			uint32_t target_idx;
+			size_t slot_cost;
+
+			target_idx = patricia_slot_target(
+			    nodes, pat_idx, sorted, addr_len, branch, slot);
+			slot_cost = (target_idx == CIDR_PAT_NONE)
+			                ? 1
+			                : nodes[target_idx].dp_cost;
+
+			if (slot_cost > node_limit - cost) {
+				valid = false;
+				break;
+			}
+			cost += slot_cost;
+		}
+
+		if (!valid)
+			continue;
+
+		if (!best_valid || cost < best_cost ||
+		    (cost == best_cost && branch > best_branch)) {
+			best_cost = cost;
+			best_branch = branch;
+			best_valid = true;
+		}
+	}
+
+	if (!best_valid)
+		return false;
+
+	node->dp_cost = best_cost;
+	node->optimal_branch = best_branch;
+	return true;
+}
+
+/*
+ * lctrie_pack_dead_leaf - materialize one dead LC-trie child slot.
+ *
+ * Dead slots are explicit array entries because lookup computes child
+ * addresses by direct indexing. See ARCHITECTURE.md §6.4.2.
+ *
+ * SAFETY: dead descendants use the Phase 6 sentinel contract:
+ * branch == 0 and prefix_idx == UINT32_MAX. The lookup terminates at these
+ * leaves without treating them as matches. See ARCHITECTURE.md §6.2, §6.4.
+ */
+static void
+lctrie_pack_dead_leaf(cidr_lctrie_node_t *nodes, uint32_t node_idx)
+{
+	nodes[node_idx].base = 0;
+	nodes[node_idx].prefix_idx = UINT32_MAX;
+	nodes[node_idx].branch = 0;
+	nodes[node_idx].skip = 0;
+	nodes[node_idx].pad[0] = 0;
+	nodes[node_idx].pad[1] = 0;
+}
+
+/*
+ * lctrie_pack_subtree - emit one DP-optimised Patricia subtree into the
+ * final packed LC-trie array.
+ *
+ * nodes:         Patricia node arena
+ * pat_idx:       subtree to copy
+ * sorted:        sorted prefix array
+ * addr_len:      address width in bytes (4 or 16)
+ * packed:        caller-allocated final LC node array
+ * packed_idx:    slot where this subtree root must be written
+ * next_free:     next unallocated packed slot after all reserved roots
+ * parent_depth:  conceptual tested-bit depth after the parent consumed its
+ *                branch bits; root uses 0
+ *
+ * The function duplicates live Patricia subtrees when multiple LC child slots
+ * reference the same compressed path, as required by ARCHITECTURE.md §6.4.3.
+ */
+static void
+lctrie_pack_subtree(const cidr_pat_node_t *nodes, uint32_t pat_idx,
+                    const cidr_prefix_t *sorted, size_t addr_len,
+                    cidr_lctrie_node_t *packed, uint32_t packed_idx,
+                    uint32_t *next_free, int parent_depth)
+{
+	const cidr_pat_node_t *pat_node;
+	cidr_lctrie_node_t *packed_node;
+	uint8_t branch;
+
+	pat_node = &nodes[pat_idx];
+	packed_node = &packed[packed_idx];
+
 	/*
-	 * The "inherited" prefix for children is the prefix stored at
-	 * this node (if any), or the inherited prefix from above.
+	 * SAFETY: skip is recomputed from conceptual Patricia bit positions,
+	 * not copied from the Phase 6.2 node. The formula matches
+	 * ARCHITECTURE.md §6.4.4 exactly.
 	 */
-	{
-		uint32_t child_inherited;
+	packed_node->base = 0;
+	packed_node->prefix_idx = pat_node->prefix_idx;
+	packed_node->branch = pat_node->optimal_branch;
+	packed_node->skip = (uint8_t)(pat_node->bit_position - parent_depth);
+	packed_node->pad[0] = 0;
+	packed_node->pad[1] = 0;
 
-		child_inherited = (best_prefix_idx != UINT32_MAX)
-		                      ? best_prefix_idx
-		                      : inherited;
+	branch = pat_node->optimal_branch;
+	if (branch == 0)
+		return;
 
-		trie_subtree_build(
-		    sorted, ext_start, pivot, split_bit + 1, key_bits, addr_len,
-		    nodes, nodes[write_at].base, next_free, child_inherited);
-		trie_subtree_build(sorted, pivot, end, split_bit + 1, key_bits,
-		                   addr_len, nodes, nodes[write_at].base + 1,
-		                   next_free, child_inherited);
+	packed_node->base = *next_free;
+	*next_free += (uint32_t)(1U << branch);
+
+	for (uint32_t slot = 0; slot < (1U << branch); slot++) {
+		uint32_t child_packed_idx, child_pat_idx;
+
+		child_packed_idx = packed_node->base + slot;
+		child_pat_idx = patricia_slot_target(nodes, pat_idx, sorted,
+		                                     addr_len, branch, slot);
+
+		/*
+		 * SAFETY: when multiple slot patterns resolve to the same
+		 * Patricia node, the packed array stores a full duplicate
+		 * copy per slot. The LC-trie never aliases child slots to one
+		 * shared subtree pointer. See ARCHITECTURE.md §6.4.3.
+		 */
+		if (child_pat_idx == CIDR_PAT_NONE) {
+			lctrie_pack_dead_leaf(packed, child_packed_idx);
+			continue;
+		}
+
+		lctrie_pack_subtree(nodes, child_pat_idx, sorted, addr_len,
+		                    packed, child_packed_idx, next_free,
+		                    pat_node->bit_position + branch);
 	}
 }
+
+#ifdef CIDR_DEBUG
+/*
+ * lctrie_assert_invariants - validate the packed LC-trie after emission.
+ *
+ * Runs the ARCHITECTURE.md §6.4.6 post-packing assertions before the index is
+ * returned to the caller.
+ */
+static void
+lctrie_assert_invariants(const cidr_lctrie_node_t *nodes, uint32_t node_count,
+                         size_t prefix_count)
+{
+	for (uint32_t i = 0; i < node_count; i++) {
+		const cidr_lctrie_node_t *node;
+
+		node = &nodes[i];
+		assert(node->prefix_idx == UINT32_MAX ||
+		       node->prefix_idx < prefix_count);
+
+		if (node->branch == 0) {
+			if (node->prefix_idx == UINT32_MAX) {
+				assert(node->base == 0);
+				assert(node->skip == 0);
+			}
+			continue;
+		}
+
+		assert(node->branch <= CIDR_LCTRIE_MAX_BRANCH);
+		assert(node->base < node_count);
+		assert((size_t)node->base + (1U << node->branch) <= node_count);
+	}
+}
+#endif
 
 /*
  * prefixes_tag_original_indices - record original input index in the
@@ -421,10 +685,11 @@ prefixes_resolve_duplicates(cidr_prefix_t *sorted, size_t count,
 
 	run_start = 0;
 	for (i = 1; i < count; i++) {
-		const cidr_prefix_t *a = &sorted[i - 1];
-		const cidr_prefix_t *b = &sorted[i];
+		const cidr_prefix_t *a, *b;
 		bool same;
 
+		a = &sorted[i - 1];
+		b = &sorted[i];
 		same = (a->pfxlen == b->pfxlen) &&
 		       (memcmp(&a->addr.addr, &b->addr.addr, addr_len) == 0);
 
@@ -450,25 +715,34 @@ prefixes_resolve_duplicates(cidr_prefix_t *sorted, size_t count,
 /*
  * cidr_index_create - build a Patricia trie index from a prefix array.
  *
- * Validates inputs, copies and sorts the prefix array, builds a
- * basic binary Patricia trie with path compression, and returns the
- * index. Level compression is implemented in Phase 6.3.
+ * Validates inputs, copies and sorts the prefix array, builds a basic
+ * path-compressed Patricia trie, runs the LC-trie DP from
+ * ARCHITECTURE.md §6.4, and packs the result into one contiguous node
+ * allocation. The copied prefix array and sorted->original index mapping
+ * remain owned by the returned index.
  *
- * See ARCHITECTURE.md §6.2 for the full specification.
+ * See ARCHITECTURE.md §6.2, §6.3, §6.4 for the full specification.
  */
 cidr_err_t
 cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
                   cidr_index_t **out)
 {
-	cidr_index_t *idx = NULL;
-	cidr_prefix_t *copy = NULL;
-	cidr_lctrie_node_t *nodes = NULL;
-	uint32_t *orig_map = NULL;
+	cidr_index_t *idx;
+	cidr_prefix_t *copy;
+	cidr_lctrie_node_t *nodes;
+	cidr_pat_node_t *pat_nodes;
+	uint32_t *orig_map;
 	cidr_family_t family;
-	size_t addr_len, max_nodes;
+	size_t addr_len, max_pat_nodes, node_limit;
 	int key_bits;
-	uint32_t node_count;
+	uint32_t pat_root, pat_count, packed_next;
 	cidr_err_t rc;
+
+	idx = NULL;
+	copy = NULL;
+	nodes = NULL;
+	pat_nodes = NULL;
+	orig_map = NULL;
 
 	if (prefixes == NULL || out == NULL)
 		return CIDR_ERR_INVAL;
@@ -490,12 +764,13 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 
 	addr_len = (family == CIDR_AF_INET) ? 4 : 16;
 	key_bits = (family == CIDR_AF_INET) ? 32 : 128;
+	node_limit = (size_t)(UINT32_MAX - 1);
 
 	/*
 	 * Allocate the index struct.
 	 * SAFETY: this is the only allocating function in the library.
 	 * Use goto cleanup for all multi-allocation error paths per
-	 * CODING_STANDARDS.md §2.3.
+	 * CODING_STANDARDS.md §2.2.
 	 */
 	rc = CIDR_ERR_NOMEM;
 	idx = malloc(sizeof(cidr_index_t));
@@ -508,9 +783,8 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 	 * resolution, the tags are used to build the sorted->original
 	 * index mapping.
 	 *
-	 * See ARCHITECTURE.md §6.2: "The prefix array is copied into
-	 * the index -- the caller may free or modify their array after
-	 * the call returns."
+	 * See ARCHITECTURE.md §6.2: the caller may free or modify their
+	 * prefix array immediately after cidr_index_create() returns.
 	 */
 	copy = malloc(count * sizeof(cidr_prefix_t));
 	if (copy == NULL)
@@ -524,70 +798,77 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 		copy[i] = prefixes[i];
 	prefixes_tag_original_indices(copy, count);
 
-	/*
-	 * Sort by CIDR_SORT_NETWORK_ASC. The radix sort does not use
-	 * addr.family in its NETWORK_ASC sort key, so the stashed
-	 * original-index tags survive intact.
-	 */
 	radix_sort_prefixes(copy, count, CIDR_SORT_NETWORK_ASC, family);
-
-	/* Resolve duplicate prefixes: pick lowest original index. */
 	prefixes_resolve_duplicates(copy, count, addr_len);
 
-	/*
-	 * Build the sorted->original index mapping from the tags.
-	 * After duplicate resolution, all entries in a duplicate run
-	 * have the same tag (lowest original index). The mapping
-	 * sorted_position -> lowest_original_index is stored for the
-	 * lookup function to translate node prefix_idx values back
-	 * to the caller's input indices.
-	 */
 	for (size_t i = 0; i < count; i++)
 		orig_map[i] = prefix_order_tag_get(&copy[i]);
 
-	/*
-	 * Restore the true address family now that tags are extracted.
-	 * The copy array's family field must be valid for
-	 * trie_prefix_matches() in the lookup path.
-	 */
 	prefixes_restore_family(copy, count, family);
 
-	/*
-	 * Allocate the node array. For a binary trie, the maximum
-	 * node count is bounded by 2 * count + 1.
-	 *
-	 * SAFETY: the node array is a single contiguous allocation
-	 * per the architecture. See ARCHITECTURE.md §6.3.
-	 */
-	max_nodes = 2 * count + 2;
-	if (max_nodes > (size_t)(UINT32_MAX - 1))
-		max_nodes = (size_t)(UINT32_MAX - 1);
+	max_pat_nodes = 2 * count + 2;
+	if (max_pat_nodes > node_limit)
+		max_pat_nodes = node_limit;
 
-	nodes = malloc(max_nodes * sizeof(cidr_lctrie_node_t));
+	pat_nodes = malloc(max_pat_nodes * sizeof(cidr_pat_node_t));
+	if (pat_nodes == NULL)
+		goto cleanup;
+
+	pat_count = 0;
+	pat_root = patricia_subtree_build(copy, 0, count, 0, key_bits, addr_len,
+	                                  pat_nodes, &pat_count);
+	if (pat_root == CIDR_PAT_NONE) {
+		rc = CIDR_ERR_INVAL;
+		goto cleanup;
+	}
+
+	if (!patricia_dp_compute(pat_nodes, pat_root, copy, addr_len, key_bits,
+	                         node_limit)) {
+		rc = CIDR_ERR_INVAL;
+		goto cleanup;
+	}
+
+	if (pat_nodes[pat_root].dp_cost > node_limit) {
+		rc = CIDR_ERR_INVAL;
+		goto cleanup;
+	}
+
+	/*
+	 * SAFETY: the final LC-trie is one contiguous allocation sized from
+	 * the DP's total node count. No per-subtree allocation occurs during
+	 * packing. See ARCHITECTURE.md §6.3, §6.4.
+	 */
+	nodes =
+	    malloc(pat_nodes[pat_root].dp_cost * sizeof(cidr_lctrie_node_t));
 	if (nodes == NULL)
 		goto cleanup;
 
-	/*
-	 * Build the binary Patricia trie.
-	 * Nodes store SORTED position indices (indexes into the copy
-	 * array), not original caller indices. The orig_map array
-	 * translates sorted positions back to original indices.
-	 */
-	node_count = 1;
-	trie_subtree_build(copy, 0, count, 0, key_bits, addr_len, nodes, 0,
-	                   &node_count, UINT32_MAX);
+	packed_next = 1;
+	lctrie_pack_subtree(pat_nodes, pat_root, copy, addr_len, nodes, 0,
+	                    &packed_next, 0);
+
+	if ((size_t)packed_next != pat_nodes[pat_root].dp_cost) {
+		rc = CIDR_ERR_INVAL;
+		goto cleanup;
+	}
+
+#ifdef CIDR_DEBUG
+	lctrie_assert_invariants(nodes, packed_next, count);
+#endif
 
 	/*
-	 * Populate the index struct. Ownership of nodes, copy, orig_map,
-	 * and idx transfers to the caller via *out. The caller must call
-	 * cidr_index_destroy() to release them.
+	 * Ownership/lifetime: nodes, copy, and orig_map transfer into idx.
+	 * The caller receives idx through *out and must release all three via
+	 * cidr_index_destroy().
 	 */
 	idx->nodes = nodes;
-	idx->node_count = node_count;
+	idx->node_count = packed_next;
 	idx->prefixes = copy;
 	idx->prefix_count = count;
 	idx->orig_indices = orig_map;
 	idx->family = family;
+
+	free(pat_nodes);
 
 	*out = idx;
 	return CIDR_OK;
@@ -595,6 +876,7 @@ cidr_index_create(const cidr_prefix_t *prefixes, size_t count,
 cleanup:
 	free(copy);
 	free(nodes);
+	free(pat_nodes);
 	free(orig_map);
 	free(idx);
 	return rc;
@@ -623,24 +905,21 @@ cidr_index_destroy(cidr_index_t *index)
 /*
  * cidr_index_lookup - longest-prefix match for each address in an array.
  *
- * Traverses the index trie for each address. The lookup advances skip
- * bits, extracts branch bits as a child index, and descends. At each
- * node with prefix_idx != UINT32_MAX, the stored prefix is verified
- * against the address using trie_prefix_matches(); if it matches, the
- * original index (via orig_indices) is recorded as the current best.
- * Traversal ends at a leaf node (branch == 0) or when the accumulated
- * bit position exceeds the key width.
+ * Traverses the packed LC-trie for each address. The traversal advances
+ * skip bits, extracts branch bits as a direct child-slot index, and
+ * descends to nodes[base + index]. At every node with prefix_idx !=
+ * UINT32_MAX, the prefix is verified against the queried address and then
+ * recorded as the current best match.
  *
- * See ARCHITECTURE.md §6.3 for the traversal algorithm.
+ * See ARCHITECTURE.md §6.3 for lookup semantics and ARCHITECTURE.md §6.4
+ * for the packed-array invariants relied upon by traversal.
  */
 cidr_err_t
 cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
                   size_t count, ssize_t *matches, cidr_err_t *errs)
 {
 	size_t addr_len;
-	int key_bits, bit_pos, extracted;
-	size_t i;
-	const cidr_lctrie_node_t *node;
+	int key_bits;
 
 	if (index == NULL)
 		return CIDR_ERR_INVAL;
@@ -652,10 +931,11 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 	addr_len = (index->family == CIDR_AF_INET) ? 4 : 16;
 	key_bits = (index->family == CIDR_AF_INET) ? 32 : 128;
 
-	for (i = 0; i < count; i++) {
+	for (size_t i = 0; i < count; i++) {
 		ssize_t best;
+		int bit_pos;
+		const cidr_lctrie_node_t *node;
 
-		/* Validate input address. */
 		if (addrs[i].family == CIDR_AF_UNSPEC) {
 			if (errs != NULL)
 				errs[i] = CIDR_ERR_INVAL;
@@ -669,35 +949,20 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 			continue;
 		}
 
-		/*
-		 * SAFETY: node array bounds. The traversal uses
-		 * node->base + extracted where extracted < 2^branch.
-		 * For branch=0 traversal stops. For branch=1 extracted
-		 * is 0 or 1. The node array was allocated for all valid
-		 * paths during construction. Each branch node reserves
-		 * contiguous child-root slots at nodes[base] and
-		 * nodes[base + 1] before recursing, so the extracted
-		 * index always lands on a valid child root.
-		 *
-		 * See ARCHITECTURE.md §6.3.
-		 */
 		best = -1;
 		bit_pos = 0;
 		node = &index->nodes[0];
 
 		for (;;) {
-			/*
-			 * If this node stores a prefix, verify that the
-			 * address actually matches it before recording.
-			 *
-			 * NOTE: prefix_idx is the SORTED position in
-			 * the prefix copy array. We verify the match
-			 * using mask-and-compare, then translate to the
-			 * caller's original index via orig_indices.
-			 */
 			if (node->prefix_idx != UINT32_MAX) {
 				const cidr_prefix_t *pfx;
 
+				/*
+				 * NOTE: prefix_idx stores the sorted-prefix
+				 * position in index->prefixes. After a match is
+				 * confirmed, orig_indices translates it back to
+				 * the caller's original input index.
+				 */
 				pfx = &index->prefixes[node->prefix_idx];
 				if (trie_prefix_matches(pfx, &addrs[i],
 				                        addr_len))
@@ -713,20 +978,29 @@ cidr_index_lookup(const cidr_index_t *index, const cidr_addr_t *addrs,
 				break;
 
 			/*
-			 * Extract branch bits from the address, then advance
-			 * bit_pos by the CURRENT node's branch count before
-			 * updating node. After the pointer update node->branch
-			 * refers to the child, not the current node.
+			 * LC-trie traversal: advance skip bits, extract branch
+			 * bits as index, descend to nodes[base + index]. Record
+			 * the best match at every interior node with prefix_idx
+			 * != UINT32_MAX. See ARCHITECTURE.md §6.3.
+			 *
+			 * SAFETY: the DP and debug invariant pass guarantee
+			 * that every interior node has 2^branch consecutive
+			 * children starting at base, so base + extracted always
+			 * lands on a valid child slot within the array.
 			 */
-			extracted = 0;
-			for (int b = 0; b < node->branch; b++)
-				extracted =
-				    (extracted << 1) |
-				    trie_addr_bit(&addrs[i], bit_pos + b,
-				                  addr_len);
+			{
+				uint32_t extracted;
 
-			bit_pos += node->branch;
-			node = &index->nodes[node->base + (uint32_t)extracted];
+				extracted = 0;
+				for (uint8_t b = 0; b < node->branch; b++)
+					extracted = (extracted << 1) |
+					            (uint32_t)trie_addr_bit(
+					                &addrs[i], bit_pos + b,
+					                addr_len);
+
+				bit_pos += node->branch;
+				node = &index->nodes[node->base + extracted];
+			}
 		}
 
 		matches[i] = best;

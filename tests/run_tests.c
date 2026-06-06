@@ -162,6 +162,7 @@ extern int test_index_basic_lookup(void);
 extern int test_index_basic_lookup_ipv6(void);
 extern int test_index_interior_node_prefix(void);
 extern int test_index_interior_node_ipv6(void);
+extern int test_index_sparse_slot_semantics(void);
 extern int test_index_duplicate_lower_index_wins(void);
 extern int test_index_no_match(void);
 extern int test_index_memory_clean(void);
@@ -366,6 +367,8 @@ main(void)
 	RUN("test_index_basic_lookup_ipv6", test_index_basic_lookup_ipv6);
 	RUN("test_index_interior_node_prefix", test_index_interior_node_prefix);
 	RUN("test_index_interior_node_ipv6", test_index_interior_node_ipv6);
+	RUN("test_index_sparse_slot_semantics",
+	    test_index_sparse_slot_semantics);
 	RUN("test_index_duplicate_lower_index_wins",
 	    test_index_duplicate_lower_index_wins);
 	RUN("test_index_no_match", test_index_no_match);

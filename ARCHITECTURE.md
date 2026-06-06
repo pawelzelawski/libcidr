@@ -1074,6 +1074,93 @@ engine, bulk engine, and address classification are complete and verified.
 Complexity: `cidr_index_create()` O(n * W). `cidr_index_lookup()` empirically
 O(4-8) for IPv4 and O(8-15) for IPv6 on real routing tables; worst case O(W).
 
+### 6.4 LC-trie DP Recurrence -- Precise Specification
+
+This section is the authoritative specification for the level-compression DP
+used to convert the basic Patricia trie into the final array-packed LC-trie.
+
+#### 6.4.1 Candidate Branch Factors
+
+For a Patricia node at conceptual bit position `p`, every branching factor
+`b` in the range `1 .. (key_width - p)` is a valid candidate. The number of
+live descendants reachable under those `b` bits does not constrain
+admissibility. Missing descendants do not invalidate a candidate `b`.
+
+Implementations may impose a compile-time `MAX_BRANCH` cap for practical array
+size bounds. When such a cap is used, the candidate range becomes
+`1 .. min(key_width - p, MAX_BRANCH)`.
+
+#### 6.4.2 Child Slot Materialization
+
+For a chosen branching factor `b`, the packed LC-trie node materializes all
+`2^b` child slots explicitly at consecutive indices in the node array. No
+missing child slot may be elided. A slot with no live descendant is encoded as
+a dead leaf:
+
+- `branch = 0`
+- `prefix_idx = UINT32_MAX`
+- `skip = 0`
+
+This explicit materialization is required because lookup computes the child
+address as `nodes[base + index]` and therefore requires every index in the
+range `0 .. (2^b - 1)` to exist.
+
+#### 6.4.3 Node-Count Cost Formula and Duplication Rule
+
+For a Patricia subtree `T` rooted at conceptual bit position `p`, and for a
+candidate branching factor `b`, the node-count cost is:
+
+```text
+cost(T, b) = 1 + sum over all 2^b child slots of:
+    DP(real_subtree_for_slot)   if the slot is live
+    1                           if the slot is dead
+```
+
+`DP(T)` is the minimum of `cost(T, b)` over all valid candidate values of
+`b`. A dead leaf (no live descendants and no stored prefix) has `DP = 1`.
+
+When two or more `b`-bit patterns reach the same Patricia node `C` because `C`
+has path-compressed bits spanning those tested positions, each slot counts
+independently. The packed LC-trie duplicates `C`'s entire subtree once per
+referencing slot. No sharing or aliasing occurs in the packed array. Each
+duplicate contributes `DP(C)` to the sum independently.
+
+#### 6.4.4 Skip Recomputation During Packing
+
+The packed LC-trie does not inherit `skip` directly from the original Patricia
+node. For each packed child copied from Patricia node `C`, recompute:
+
+```text
+packed_child.skip = C_patricia.bit_position - (parent.bit_position + parent.b)
+```
+
+Bit positions are measured as cumulative tested bits from the root in the
+conceptual binary trie. For duplicated subtrees, every duplicate receives the
+same recomputed `skip` value because all referencing child slots sit at the
+same conceptual depth.
+
+#### 6.4.5 Tie-Breaking
+
+If two or more candidate branching factors produce the same minimum node-count
+cost, choose the larger `b`. Equal cost implies equal memory use; the larger
+branching factor is preferred because it reduces expected traversal depth.
+
+#### 6.4.6 Post-Packing Invariant Check
+
+After packing completes, the implementation runs an invariant check at the end
+of `cidr_index_create()` under `#ifdef CIDR_DEBUG` using assertions. The check
+verifies:
+
+- every node with `branch > 0` has exactly `2^branch` children at consecutive
+  indices `[base, base + 2^branch)`
+- no child index exceeds the total node count
+- every dead slot has `branch = 0` and `prefix_idx = UINT32_MAX`
+- every `prefix_idx` stored in any node is either `UINT32_MAX` or a valid
+  index into the copied prefix array
+
+These assertions validate that the packed array satisfies the direct-index
+lookup contract before the completed index is returned to the caller.
+
 ---
 
 ## 7. Address Classification

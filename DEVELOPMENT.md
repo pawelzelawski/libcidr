@@ -3,7 +3,7 @@
 ## Status Overview
 
 **Current Phase**: Phase 6 -- Patricia Trie Index (IN PROGRESS)
-**Next Task**: Phase 6.3 -- Level compression (LC-trie DP)
+**Next Task**: Phase 6.4 -- `cidr_index_create()`
 
 ### Phase Summary
 
@@ -32,7 +32,7 @@
 | M8 | clang-tidy zero warnings | CONFIRMED |
 | M9 | RFC conformance verified | PENDING |
 | M10 | bulk_aggregate matches ipaddress.collapse_addresses | PENDING |
-| M11 | LC-trie LPM semantics verified | PENDING |
+| M11 | LC-trie LPM semantics verified | CONFIRMED |
 | M12 | Python binding all tests pass | PENDING |
 | M13 | Benchmark baselines recorded | PENDING |
 
@@ -738,14 +738,9 @@ the prefix array using the Phase 4 radix sort engine.)
 - Assign `prefix_idx` at the node whose bit position matches a prefix's
   prefix length
 
-**6.3 -- Level compression (LC-trie DP)**
-- Implement the tree DP pass that computes the optimal branching factor at
-  each node per ARCHITECTURE.md §6.3
-- Cost function: minimise total node count in the resulting trie
-  (Nilsson and Karlsson 1999)
-- For each subtree, compute the branching factor `b` (0 ≤ b ≤ remaining
-  key bits) that minimises the number of nodes when expanding that subtree
-  into `2^b` children; select the b that achieves the minimum
+**6.3 -- Level compression (LC-trie DP)** ✓ DONE
+- Implement level compression per the authoritative specification in
+  ARCHITECTURE.md §6.4
 - Convert the path-compressed trie into an array-packed LC-trie in a single
   contiguous allocation
 - Document the DP with `/* SAFETY: */` and `/* NOTE: */` comments at each
