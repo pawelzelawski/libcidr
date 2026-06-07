@@ -96,11 +96,11 @@ differences from the previous baseline are within expected variance.
 
 | Prefix count | Queries | Build ms | Bulk kq/s | Index kq/s | Crossover queries |
 |---|---:|---:|---:|---:|---:|
-| 100 | 100,000 | 0.34 | 1129.18 | 56935.91 | 387 |
-| 1,000 | 100,000 | 3.32 | 114.82 | 44062.80 | 382 |
-| 10,000 | 10,000 | 32.99 | 11.53 | 32812.38 | 381 |
-| 100,000 | 1,000 | 334.18 | 113.38 | 27634.62 | 38046 |
-| 800,000 | 128 | 2744.31 | 94.10 [2] | 20056.40 | 259466 |
+| 100 | 100,000 | 0.34 | 5594.08 [5] | 56935.91 | 2058 [5] |
+| 1,000 | 100,000 | 3.32 | 623.35 [5] | 44062.80 | 2069 [5] |
+| 10,000 | 10,000 | 32.99 | 64.59 [5] | 32812.38 | 2137 [5] |
+| 100,000 | 1,000 | 334.18 | 590.65 [5] | 27634.62 | 200130 [5] |
+| 800,000 | 128 | 2744.31 | 116.78 [2][5] | 20056.40 | 320173 [5] |
 
 ### Linux ARM64
 
@@ -263,6 +263,21 @@ non-siblings). Full Linux gate passed: dev build (141/141), tests, valgrind
 bench_aggregate_early_exit 16.97 / 17.11 / 16.63 / 15.61 M prefixes/s. The
 gains reflect the Investigation 5 code change (internal aggregation
 comparators), not variance. Values are stable across three consecutive runs.
+
+[5] bench_index_vs_bulk_crossover refresh after Investigation 4. Only the
+Bulk kq/s and Crossover queries columns changed; Build ms and Index kq/s are
+unchanged within measurement noise and were left at their previous values.
+The faster bulk containment scan raises the per-row crossover threshold,
+because the index build cost now takes proportionally more queries to
+amortize. Previous Bulk kq/s: 1129.18 / 114.82 / 11.53 / 113.38 / 94.10;
+previous Crossover queries: 387 / 382 / 381 / 38046 / 259466. The 100 / 1,000
+/ 10,000 / 100,000 rows moved ~5x: their prefix arrays (up to ~2.4 MB at 100k,
+24 bytes per prefix) fit within this CPU's 4 MB-per-CCX L3, so the scan stays
+compute-bound and benefits fully from the mask-free comparator. Only the
+800,000 row (~19 MB, exceeds L3) is memory-bandwidth-bound and moved ~+24%.
+Crossover values are medians of three consecutive runs; the 800k bulk figure
+remains high-variance per footnote [2], so its crossover (~300k-330k queries)
+is order-of-magnitude.
 
 ## Python Benchmarks
 
