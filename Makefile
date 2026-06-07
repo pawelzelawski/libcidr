@@ -286,6 +286,7 @@ format:
 	    tests/test_bulk.c						\
 	    tests/test_classify.c					\
 	    tests/test_index.c					\
+	    tests/test_tsan.c						\
 	    tests/test_harness.h
 
 # --- install -------------------------------------------------------------------

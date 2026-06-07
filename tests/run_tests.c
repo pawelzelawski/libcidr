@@ -124,6 +124,7 @@ extern int test_bulk_sort_null_prefixes(void);
 extern int test_bulk_sort_family_mismatch(void);
 extern int test_bulk_sort_unspec_family(void);
 #ifdef CIDR_TSAN
+extern int test_concurrent_parse(void);
 extern int test_concurrent_bulk_sort_independent(void);
 extern int test_concurrent_bulk_aggregate_independent(void);
 extern int test_concurrent_index_lookup(void);
@@ -330,6 +331,7 @@ main(void)
 	RUN("test_bulk_sort_family_mismatch", test_bulk_sort_family_mismatch);
 	RUN("test_bulk_sort_unspec_family", test_bulk_sort_unspec_family);
 #ifdef CIDR_TSAN
+	RUN("test_concurrent_parse", test_concurrent_parse);
 	RUN("test_concurrent_bulk_sort_independent",
 	    test_concurrent_bulk_sort_independent);
 	RUN("test_concurrent_bulk_aggregate_independent",

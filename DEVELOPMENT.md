@@ -16,7 +16,7 @@
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
 | 7 | Python Binding Layer | COMPLETE | 218/218 | CPython stable ABI extension; bulk_contains_packed memoryview entry point |
-| 8 | Hardening, Benchmarks, and Release | PENDING | 0/0 | Sanitizers, benchmarks, README, tag |
+| 8 | Hardening, Benchmarks, and Release | IN PROGRESS | 0/0 | Sanitizers and concurrent tests complete; benchmarks, README, and tag remain |
 
 ### Quality Milestones
 
@@ -27,7 +27,7 @@
 | M3 | All C tests pass on OpenBSD | CONFIRMED |
 | M4 | Valgrind clean on Linux | CONFIRMED |
 | M5 | ASan/UBSan clean on every target whose toolchain supports them | CONFIRMED |
-| M6 | TSan clean on Linux | CONFIRMED |
+| M6 | TSan clean on Linux | CONFIRMED (8.1: `make test-tsan` 137/137, 0 races) |
 | M7 | clang-format clean | CONFIRMED |
 | M8 | clang-tidy zero warnings | CONFIRMED |
 | M9 | RFC conformance verified | PENDING |
@@ -963,16 +963,17 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 
 ### Tasks
 
-**8.1 -- Full sanitizer pass**
+**8.1 -- Full sanitizer pass** ✓ DONE
 - Run `make test-tsan` on Linux and confirm M6
 - Run `make valgrind` on Linux and confirm M4
 - Run `make dev && make test` on all four targets and confirm M5
 - Run `make lint` on all four targets and confirm M7, M8
 - Fix any warnings or errors found; do not suppress
 
-**8.2 -- TSan concurrent tests**
-- Add `test_concurrent_parse()` and `test_concurrent_index_lookup()` to
-  `tests/test_addr.c` and `tests/test_index.c` respectively per TESTING.md §4.3
+**8.2 -- TSan concurrent tests** ✓ DONE
+- Add `test_concurrent_parse()` and `test_concurrent_index_lookup()` per
+  TESTING.md §4.3 (placed in `tests/test_tsan.c` following the established
+  TSan test pattern; `test_concurrent_index_lookup` existed from Phase 6)
 - Each test spawns N pthreads running the relevant operation in a tight
   loop; verify TSan reports no races
 - These tests run only under `make test-tsan`, not under `make test`
