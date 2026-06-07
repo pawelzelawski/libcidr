@@ -531,6 +531,64 @@ cidr_bulk_parse(const char **srcs, size_t count, cidr_addr_t *out,
 }
 
 /*
+ * bulk_prefix_contains - mask-free containment test for the bulk scan.
+ *
+ * Tests (addr & mask(pfxlen)) == prefix network, identical in result to
+ * cidr_prefix_contains() (ARCHITECTURE.md §4.3.5), but specialised for the
+ * inner scan loop: the caller (cidr_bulk_contains) has already validated
+ * that pfx and addr share one valid, non-UNSPEC family, so this helper
+ * performs no per-pair revalidation and never materialises a mask address.
+ * Full prefix bytes are compared directly; the single partial byte (if any)
+ * is compared under a one-byte mask. This mirrors the index-path predicate
+ * in trie_prefix_matches() (cidr_index.c).
+ *
+ * pfx:  prefix whose host bits are zero by construction (the never-rechecked
+ *       invariant from PROJECT.md principle 4 / ARCHITECTURE.md §3.3)
+ * addr: address of the same family as pfx
+ *
+ * Returns true when addr falls within pfx.
+ *
+ * SAFETY: equivalence to the masked compare relies on the §3.3 host-bits-zero
+ * invariant -- because the prefix bits below pfxlen are zero, comparing only
+ * the top pfxlen bits of addr against pfx is equivalent to masking addr and
+ * comparing the full network. pfxlen is in range for the family by the same
+ * construction contract, so full_bytes (+1 for the partial byte) never
+ * exceeds the address width.
+ */
+static inline bool
+bulk_prefix_contains(const cidr_prefix_t *pfx, const cidr_addr_t *addr)
+{
+	const uint8_t *pfx_bytes;
+	const uint8_t *addr_bytes;
+	uint8_t pfxlen;
+	size_t full_bytes;
+	int bit_rem;
+
+	pfxlen = pfx->pfxlen;
+	if (pfxlen == 0)
+		return true;
+
+	pfx_bytes = (const uint8_t *)&pfx->addr.addr;
+	addr_bytes = (const uint8_t *)&addr->addr;
+
+	full_bytes = (size_t)(pfxlen / 8);
+	bit_rem = pfxlen % 8;
+
+	if (memcmp(pfx_bytes, addr_bytes, full_bytes) != 0)
+		return false;
+
+	if (bit_rem > 0) {
+		uint8_t mask = (uint8_t)(0xFF << (8 - bit_rem));
+
+		if ((pfx_bytes[full_bytes] & mask) !=
+		    (addr_bytes[full_bytes] & mask))
+			return false;
+	}
+
+	return true;
+}
+
+/*
  * cidr_bulk_contains - bulk containment: find first matching prefix for
  *                       each address.
  *
@@ -642,17 +700,16 @@ cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
 
 	/*
 	 * For each address, scan prefixes in order. First match wins.
-	 * See ARCHITECTURE.md §5.3.
+	 * The scan uses the internal mask-free comparator instead of the
+	 * public cidr_prefix_contains() so each (addr, prefix) pair avoids a
+	 * cross-call revalidation and mask materialisation; families were
+	 * validated once above. See ARCHITECTURE.md §5.3.
 	 */
 	for (i = 0; i < addr_count; i++) {
 		ssize_t match = -1;
 
 		for (j = 0; j < prefix_count; j++) {
-			bool contained;
-
-			if (cidr_prefix_contains(&prefixes[j], &addrs[i],
-			                         &contained) == CIDR_OK &&
-			    contained) {
+			if (bulk_prefix_contains(&prefixes[j], &addrs[i])) {
 				match = (ssize_t)j;
 				break;
 			}

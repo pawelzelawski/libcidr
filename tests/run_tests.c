@@ -102,6 +102,9 @@ extern int test_bulk_contains_lpm_with_sorted_table(void);
 extern int test_bulk_contains_empty_prefix_table(void);
 extern int test_bulk_contains_null_matches_nonzero_count(void);
 extern int test_bulk_contains_family_mismatch(void);
+extern int test_bulk_contains_partial_byte_boundary(void);
+extern int test_bulk_contains_default_route(void);
+extern int test_bulk_contains_ipv6_match(void);
 extern int test_bulk_aggregate_known_cases(void);
 extern int test_bulk_aggregate_duplicate_removal(void);
 extern int test_bulk_aggregate_containment_removal(void);
@@ -298,6 +301,11 @@ main(void)
 	    test_bulk_contains_null_matches_nonzero_count);
 	RUN("test_bulk_contains_family_mismatch",
 	    test_bulk_contains_family_mismatch);
+	RUN("test_bulk_contains_partial_byte_boundary",
+	    test_bulk_contains_partial_byte_boundary);
+	RUN("test_bulk_contains_default_route",
+	    test_bulk_contains_default_route);
+	RUN("test_bulk_contains_ipv6_match", test_bulk_contains_ipv6_match);
 	RUN("test_bulk_aggregate_known_cases", test_bulk_aggregate_known_cases);
 	RUN("test_bulk_aggregate_duplicate_removal",
 	    test_bulk_aggregate_duplicate_removal);

@@ -489,6 +489,122 @@ test_bulk_contains_family_mismatch(void)
 }
 
 /*
+ * test_bulk_contains_partial_byte_boundary -- a non-byte-aligned prefix
+ * length (/20) exercises the partial-byte mask branch of the containment
+ * comparator. An address inside the prefix matches; a near-miss that differs
+ * only in the masked bits of the partial byte does not. See ARCHITECTURE.md
+ * §5.3, §4.3.5.
+ */
+int
+test_bulk_contains_partial_byte_boundary(void)
+{
+	cidr_prefix_t prefixes[1];
+	cidr_addr_t addrs[2];
+	ssize_t matches[2];
+	cidr_err_t rc;
+
+	/*
+	 * 10.16.0.0/20 covers 10.16.0.0 .. 10.16.15.255: bytes 0-1 are
+	 * compared in full, and only the top 4 bits of byte 2 are masked.
+	 */
+	if (cidr_prefix_parse("10.16.0.0/20", &prefixes[0]) != CIDR_OK)
+		return 1;
+
+	/* 10.16.15.254 is inside (byte 2 = 0x0f, top nibble 0). */
+	if (cidr_addr_parse("10.16.15.254", &addrs[0]) != CIDR_OK)
+		return 1;
+	/*
+	 * 10.16.16.1 differs only in the masked bits of the partial byte
+	 * (byte 2 = 0x10, top nibble 1), so it falls outside the /20.
+	 */
+	if (cidr_addr_parse("10.16.16.1", &addrs[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 2, prefixes, 1, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+	if (matches[0] != 0)
+		return 1;
+	if (matches[1] != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_default_route -- a /0 prefix matches every address,
+ * exercising the pfxlen == 0 short-circuit of the containment comparator.
+ * See ARCHITECTURE.md §5.3.
+ */
+int
+test_bulk_contains_default_route(void)
+{
+	cidr_prefix_t prefixes[1];
+	cidr_addr_t addrs[2];
+	ssize_t matches[2];
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("0.0.0.0/0", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("10.0.0.1", &addrs[0]) != CIDR_OK)
+		return 1;
+	if (cidr_addr_parse("203.0.113.255", &addrs[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 2, prefixes, 1, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+	if (matches[0] != 0 || matches[1] != 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * test_bulk_contains_ipv6_match -- IPv6 containment across the 16-byte path.
+ * A byte-aligned /48 and a non-byte-aligned /36 exercise both the full-byte
+ * and partial-byte branches of the comparator for the wider family.
+ * See ARCHITECTURE.md §5.3, §4.3.5.
+ */
+int
+test_bulk_contains_ipv6_match(void)
+{
+	cidr_prefix_t prefixes[2];
+	cidr_addr_t addrs[3];
+	ssize_t matches[3];
+	cidr_err_t rc;
+
+	/* /48 is byte-aligned (full-byte compare only). */
+	if (cidr_prefix_parse("2001:db8:abcd::/48", &prefixes[0]) != CIDR_OK)
+		return 1;
+	/* /36 is non-byte-aligned (partial-byte mask branch). */
+	if (cidr_prefix_parse("2001:db8:a000::/36", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	/* Inside the /48 (and also inside the /36); first match wins -> 0. */
+	if (cidr_addr_parse("2001:db8:abcd:1::1", &addrs[0]) != CIDR_OK)
+		return 1;
+	/* Inside the /36 but not the /48 -> 1. */
+	if (cidr_addr_parse("2001:db8:a123::1", &addrs[1]) != CIDR_OK)
+		return 1;
+	/* Outside both -> -1. */
+	if (cidr_addr_parse("2001:db8:b000::1", &addrs[2]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_contains(addrs, 3, prefixes, 2, matches, NULL);
+	if (rc != CIDR_OK)
+		return 1;
+	if (matches[0] != 0)
+		return 1;
+	if (matches[1] != 1)
+		return 1;
+	if (matches[2] != -1)
+		return 1;
+
+	return 0;
+}
+
+/*
  * test_bulk_aggregate_known_cases -- known aggregation cases verified
  * against ipaddress.collapse_addresses reference results.
  * See ARCHITECTURE.md §5.4.

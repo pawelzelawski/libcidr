@@ -28,8 +28,9 @@ like.
 pinning. Run-to-run variance of ±3-5% is normal on this configuration.
 Numbers that differ from a previous run within that band are measurement
 noise, not regressions or improvements. Only the IPv6 parse improvement
-(footnote [1]) reflects a code change; all other differences from the
-previous baseline are within expected variance.
+(footnote [1]) and the bulk containment improvement (footnote [3]) reflect
+code changes; all other differences from the previous baseline are within
+expected variance.
 
 **bench_bulk_parse**
 
@@ -42,9 +43,9 @@ previous baseline are within expected variance.
 
 | Prefix table size | libcidr (M pairs/s) |
 |---|---:|
-| 100 | 57.32 |
-| 1,000 | 57.62 |
-| 10,000 | 57.55 |
+| 100 | 304.35 [3] |
+| 1,000 | 323.33 [3] |
+| 10,000 | 327.95 [3] |
 
 **bench_bulk_aggregate**
 
@@ -180,6 +181,37 @@ Above the 10% keep threshold.
 **Kept.** Change is in src/cidr_addr.c only. Full Linux gate passed:
 dev build, tests, valgrind, TSan, format, lint.
 
+### Investigation 4 — bulk containment mask-free comparator
+
+**Date**: 2026-06-07
+**Scope**: bench_bulk_contains throughput
+
+**Hypothesis**: cidr_bulk_contains() called the public cidr_prefix_contains()
+once per (address, prefix) pair. Because benchmarks link the static archive
+under the documented -O2 build with no LTO, that call cannot be inlined: every
+pair paid a cross-translation-unit call, full NULL/family/UNSPEC revalidation,
+and a stack-materialised mask address. Replacing it with an internal mask-free
+comparator -- families are already validated once at the top of the scan, and
+the §3.3 host-bits-zero invariant lets the test compare only the top pfxlen
+bits -- should remove that per-pair overhead.
+
+**Profiling finding**: the contains benchmark is a deliberate no-match full
+scan (all /24 prefixes, all addresses outside the table), so the inner loop
+runs addr_count x prefix_count times with no early break. Per-pair compare
+cost is the entire benchmark, making the cross-call overhead dominant.
+
+**Result**: bench_bulk_contains: 57.3-57.6 -> 304-328 M pairs/s across the
+100 / 1,000 / 10,000 prefix tables (~5.3-5.7x, +430% to +470%). Far above the
+10% keep threshold.
+
+**Kept.** Change is in src/cidr_bulk.c only (new internal
+bulk_prefix_contains() helper; public cidr_prefix_contains() and the API are
+unchanged). RFC containment semantics ((addr & mask) == network) are
+preserved; the predicate now matches the index-path comparator
+trie_prefix_matches(). Three boundary tests added (non-byte-aligned /20, /0
+default route, IPv6 /48 and /36). Full Linux gate passed: dev build (138/138),
+tests, valgrind (0 errors, 0 leaks), TSan (140/140, 0 races), format, lint.
+
 [1] Previous baseline: 21.54 M addrs/s. Fresh run differs by more than 3%
 after the IPv6 hex decoder optimization landed.
 
@@ -187,6 +219,10 @@ after the IPv6 hex decoder optimization landed.
 has high run-to-run variance. The crossover query count derived from it
 should be treated as an order-of-magnitude estimate (~250k-300k queries),
 not a precise threshold.
+
+[3] Previous baseline: 57.32 / 57.62 / 57.55 M pairs/s. The ~5x gain reflects
+the Investigation 4 code change (internal mask-free comparator), not variance.
+Values are the stable figure across three consecutive runs.
 
 ## Python Benchmarks
 
