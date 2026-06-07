@@ -89,6 +89,9 @@ TEST_SRCS_TSAN = $(TEST_SRCS) tests/test_tsan.c
 
 THREAD_FLAGS = -pthread
 
+BENCH_BULK_SRC  = bench/bench_bulk.c
+BENCH_INDEX_SRC = bench/bench_index.c
+
 # --- Build paths --------------------------------------------------------------
 
 BUILD_DIR       = build
@@ -96,6 +99,7 @@ REL_DIR         = $(BUILD_DIR)/rel
 TSAN_DIR        = $(BUILD_DIR)/tsan
 VG_DIR          = $(BUILD_DIR)/vg
 BUILD_TESTS_DIR = $(BUILD_DIR)/tests
+BUILD_BENCH_DIR = $(BUILD_DIR)/bench
 PY_DIR          = python
 
 LIB_DEV     = $(BUILD_DIR)/libcidr.a
@@ -106,6 +110,8 @@ LIB_VG      = $(VG_DIR)/libcidr.a
 TEST_BIN      = $(BUILD_TESTS_DIR)/run_tests
 TEST_BIN_TSAN = $(BUILD_TESTS_DIR)/run_tests_tsan
 TEST_BIN_VG   = $(BUILD_TESTS_DIR)/run_tests_vg
+BENCH_BULK_BIN  = $(BUILD_BENCH_DIR)/bench_bulk
+BENCH_INDEX_BIN = $(BUILD_BENCH_DIR)/bench_index
 
 INCLUDES = -I include/
 
@@ -240,10 +246,11 @@ test-python: $(PY_DIR)/$(PYEXT_ABI3)
 	PYTHONPATH=$(PY_DIR) $(PY) -m unittest tests.test_python -v
 
 # --- Benchmarks (Phase 8) -----------------------------------------------------
-# Built under release flags. Stubs until implemented.
+# Built under release flags.
 
-bench:
-	@echo "C benchmarks not yet implemented (Phase 8)"
+bench: $(BENCH_BULK_BIN) $(BENCH_INDEX_BIN)
+	$(BENCH_BULK_BIN)
+	$(BENCH_INDEX_BIN)
 
 bench-python:
 	@echo "Python benchmarks not yet implemented (Phase 8)"
@@ -272,6 +279,8 @@ lint:
 
 format:
 	clang-format -i							\
+	    bench/bench_bulk.c						\
+	    bench/bench_index.c						\
 	    src/cidr_addr.c						\
 	    src/cidr_prefix.c						\
 	    src/cidr_bulk.c						\
@@ -365,3 +374,17 @@ $(TEST_BIN_VG): $(LIB_VG) $(TEST_SRCS) include/libcidr.h tests/test_harness.h
 	$(CC) $(CFLAGS_VG) $(INCLUDES) -I tests/	\
 	    $(TEST_SRCS) $(LIB_VG)			\
 	    -o $(TEST_BIN_VG)
+
+# --- Benchmark binaries (release build) --------------------------------------
+
+$(BENCH_BULK_BIN): $(LIB_RELEASE) $(BENCH_BULK_SRC) include/libcidr.h
+	@mkdir -p $(BUILD_BENCH_DIR)
+	$(CC) $(CFLAGS_RELEASE) $(INCLUDES)		\
+	    $(BENCH_BULK_SRC) $(LIB_RELEASE)		\
+	    -o $(BENCH_BULK_BIN)
+
+$(BENCH_INDEX_BIN): $(LIB_RELEASE) $(BENCH_INDEX_SRC) include/libcidr.h
+	@mkdir -p $(BUILD_BENCH_DIR)
+	$(CC) $(CFLAGS_RELEASE) $(INCLUDES)		\
+	    $(BENCH_INDEX_SRC) $(LIB_RELEASE)		\
+	    -o $(BENCH_INDEX_BIN)

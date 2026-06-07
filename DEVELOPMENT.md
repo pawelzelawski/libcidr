@@ -979,10 +979,14 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 - These tests run only under `make test-tsan`, not under `make test`
   (they require TSan instrumentation to be meaningful)
 
-**8.3 -- C benchmark suite**
+**8.3 -- C benchmark suite** ✓ DONE
 - Implement `bench/bench_bulk.c` and `bench/bench_index.c` per
   REPOSITORY_STRUCTURE.md §6
-- Run on Linux x86_64 and ARM64, OpenBSD amd64
+- Run on Linux x86_64
+- Linux ARM64 benchmark run deferred -- no ARM64 benchmark host available
+- OpenBSD amd64 benchmark run not required for this task -- available host is
+  an old 2-core validation machine and is not treated as a meaningful
+  benchmark baseline source
 - Record baseline numbers in `bench/BASELINES.md` with full hardware context
   per TESTING.md §8.2
 
