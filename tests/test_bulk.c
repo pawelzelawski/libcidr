@@ -811,6 +811,109 @@ test_bulk_aggregate_sibling_merge(void)
 }
 
 /*
+ * test_bulk_aggregate_ipv6_sibling_merge -- adjacent IPv6 /64 siblings merge
+ * to /63, exercising the 16-byte and partial-byte branches of the sibling
+ * test and the IPv6 host-bit clearing of the internal supernet helper.
+ * See ARCHITECTURE.md §5.4 step 4.
+ */
+int
+test_bulk_aggregate_ipv6_sibling_merge(void)
+{
+	cidr_prefix_t prefixes[2];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("2001:db8::/64", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("2001:db8:0:1::/64", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 2, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "2001:db8::/63") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_default_route_merge -- the two /1 halves merge to the
+ * /0 default route. This is the parent_bits == 0 boundary of the sibling
+ * test (agreement on zero shared bits) and the /0 result of the internal
+ * supernet helper. See ARCHITECTURE.md §5.4 step 4.
+ */
+int
+test_bulk_aggregate_default_route_merge(void)
+{
+	cidr_prefix_t prefixes[2];
+	size_t out_count;
+	cidr_err_t rc;
+
+	if (cidr_prefix_parse("0.0.0.0/1", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("128.0.0.0/1", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 2, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 1)
+		return 1;
+
+	{
+		char buf[CIDR_PREFIX_STR_MAX];
+
+		if (cidr_prefix_format(&prefixes[0], buf, sizeof(buf)) !=
+		    CIDR_OK)
+			return 1;
+		if (strcmp(buf, "0.0.0.0/0") != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
+ * test_bulk_aggregate_non_sibling_same_pfxlen -- two equal-length prefixes
+ * that share a partial supernet byte but differ within it are not siblings
+ * and must not merge. Guards the partial-byte mask of the sibling test
+ * against over-merging. See ARCHITECTURE.md §5.4 step 4.
+ */
+int
+test_bulk_aggregate_non_sibling_same_pfxlen(void)
+{
+	cidr_prefix_t prefixes[2];
+	size_t out_count;
+	cidr_err_t rc;
+
+	/* 192.168.0.0/24 and 192.168.2.0/24 share the top 22 bits but differ
+	 * at bit 22, so their /23 supernets are distinct. */
+	if (cidr_prefix_parse("192.168.0.0/24", &prefixes[0]) != CIDR_OK)
+		return 1;
+	if (cidr_prefix_parse("192.168.2.0/24", &prefixes[1]) != CIDR_OK)
+		return 1;
+
+	rc = cidr_bulk_aggregate(prefixes, 2, &out_count);
+	if (rc != CIDR_OK)
+		return 1;
+	if (out_count != 2)
+		return 1;
+
+	return 0;
+}
+
+/*
  * test_bulk_aggregate_early_termination -- already-aggregated input
  * produces no merges and exits immediately. See ARCHITECTURE.md §5.4.
  */

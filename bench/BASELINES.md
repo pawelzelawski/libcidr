@@ -28,9 +28,9 @@ like.
 pinning. Run-to-run variance of ±3-5% is normal on this configuration.
 Numbers that differ from a previous run within that band are measurement
 noise, not regressions or improvements. Only the IPv6 parse improvement
-(footnote [1]) and the bulk containment improvement (footnote [3]) reflect
-code changes; all other differences from the previous baseline are within
-expected variance.
+(footnote [1]), the bulk containment improvement (footnote [3]), and the
+aggregation improvements (footnote [4]) reflect code changes; all other
+differences from the previous baseline are within expected variance.
 
 **bench_bulk_parse**
 
@@ -51,10 +51,10 @@ expected variance.
 
 | Prefix count | libcidr (M prefixes/s) |
 |---|---:|
-| 1,000 | 5.59 |
-| 10,000 | 5.70 |
-| 100,000 | 5.65 |
-| 800,000 | 5.46 |
+| 1,000 | 6.51 [4] |
+| 10,000 | 6.73 [4] |
+| 100,000 | 6.65 [4] |
+| 800,000 | 6.38 [4] |
 
 **bench_bulk_sort_network_asc**
 
@@ -72,10 +72,10 @@ expected variance.
 
 | Prefix count | libcidr (M prefixes/s) |
 |---|---:|
-| 1,000 | 16.97 |
-| 10,000 | 17.11 |
-| 100,000 | 16.63 |
-| 800,000 | 15.61 |
+| 1,000 | 29.19 [4] |
+| 10,000 | 29.68 [4] |
+| 100,000 | 28.73 [4] |
+| 800,000 | 25.40 [4] |
 
 **bench_index_build**
 
@@ -223,6 +223,46 @@ not a precise threshold.
 [3] Previous baseline: 57.32 / 57.62 / 57.55 M pairs/s. The ~5x gain reflects
 the Investigation 4 code change (internal mask-free comparator), not variance.
 Values are the stable figure across three consecutive runs.
+
+### Investigation 5 — aggregation internal comparators
+
+**Date**: 2026-06-07
+**Scope**: bench_bulk_aggregate and bench_aggregate_early_exit throughput
+
+**Hypothesis**: the three per-element steps of cidr_bulk_aggregate() each
+called a public cidr_prefix_* function that cannot be inlined across the
+static archive at -O2 with no LTO. Step 2 (duplicate removal) called
+cidr_prefix_cmp(); step 3 (containment removal) called cidr_prefix_contains();
+step 4 (sibling merge) called cidr_prefix_supernet() twice per adjacent pair
+inside prefixes_are_siblings() and once more to build each merged supernet.
+Every one of those paid a cross-call plus full revalidation, and the merge
+loop repeats over the array until a pass makes no merges. The whole family is
+validated once at function entry, so internal comparators can take addr_len
+directly: dedup reuses the existing prefixes_equal_key(), containment reuses
+the Investigation 4 bulk_prefix_contains(), the sibling test compares the top
+pfxlen-1 bits directly, and a new prefix_supernet_into() builds the merged
+parent without a cross-call.
+
+**Result**:
+- bench_bulk_aggregate: 5.46-5.70 -> 6.38-6.73 M prefixes/s (~+16% to +18%).
+- bench_aggregate_early_exit: 15.61-17.11 -> 25.40-29.68 M prefixes/s
+  (~+63% to +72%). The early-exit workload terminates the merge step quickly,
+  so the per-element dedup and containment steps dominate and benefit most.
+
+Both above the 10% keep threshold.
+
+**Kept.** Change is in src/cidr_bulk.c only; the public cidr_prefix_cmp(),
+cidr_prefix_contains(), and cidr_prefix_supernet() and the API are unchanged.
+The §5.4 aggregation algorithm and RFC semantics (sibling merge, supernet at
+pfxlen-1, host-bits-zero results) are preserved. Three boundary tests added
+(IPv6 /64 sibling merge, /1 pair -> /0 default route, equal-length
+non-siblings). Full Linux gate passed: dev build (141/141), tests, valgrind
+(0 errors, 0 leaks), TSan (143/143, 0 races), format, lint.
+
+[4] Previous baseline: bench_bulk_aggregate 5.59 / 5.70 / 5.65 / 5.46;
+bench_aggregate_early_exit 16.97 / 17.11 / 16.63 / 15.61 M prefixes/s. The
+gains reflect the Investigation 5 code change (internal aggregation
+comparators), not variance. Values are stable across three consecutive runs.
 
 ## Python Benchmarks
 

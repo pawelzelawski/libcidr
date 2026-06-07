@@ -105,6 +105,9 @@ extern int test_bulk_contains_family_mismatch(void);
 extern int test_bulk_contains_partial_byte_boundary(void);
 extern int test_bulk_contains_default_route(void);
 extern int test_bulk_contains_ipv6_match(void);
+extern int test_bulk_aggregate_ipv6_sibling_merge(void);
+extern int test_bulk_aggregate_default_route_merge(void);
+extern int test_bulk_aggregate_non_sibling_same_pfxlen(void);
 extern int test_bulk_aggregate_known_cases(void);
 extern int test_bulk_aggregate_duplicate_removal(void);
 extern int test_bulk_aggregate_containment_removal(void);
@@ -306,6 +309,12 @@ main(void)
 	RUN("test_bulk_contains_default_route",
 	    test_bulk_contains_default_route);
 	RUN("test_bulk_contains_ipv6_match", test_bulk_contains_ipv6_match);
+	RUN("test_bulk_aggregate_ipv6_sibling_merge",
+	    test_bulk_aggregate_ipv6_sibling_merge);
+	RUN("test_bulk_aggregate_default_route_merge",
+	    test_bulk_aggregate_default_route_merge);
+	RUN("test_bulk_aggregate_non_sibling_same_pfxlen",
+	    test_bulk_aggregate_non_sibling_same_pfxlen);
 	RUN("test_bulk_aggregate_known_cases", test_bulk_aggregate_known_cases);
 	RUN("test_bulk_aggregate_duplicate_removal",
 	    test_bulk_aggregate_duplicate_removal);

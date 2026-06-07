@@ -727,34 +727,99 @@ cidr_bulk_contains(const cidr_addr_t *addrs, size_t addr_count,
  * prefixes_are_siblings - check whether two prefixes are mergeable
  *                         siblings (same pfxlen, same supernet).
  *
- * Two prefixes are siblings if they have equal prefix length (greater
- * than zero) and their supernets at pfxlen - 1 are identical.
- * See ARCHITECTURE.md §5.4 sibling merge.
+ * Two prefixes are siblings if they have equal prefix length (greater than
+ * zero) and their supernets at pfxlen - 1 are identical. The supernet at
+ * pfxlen - 1 zeroes every bit from position pfxlen - 1 onward, so two equal
+ * length network prefixes share a supernet exactly when they agree on the
+ * top pfxlen - 1 bits. This compares those bits directly instead of
+ * materialising both supernets through cidr_prefix_supernet(); the public
+ * function is correct but pays a cross-call plus a full address copy per
+ * comparison, and the merge loop calls this once per adjacent pair per pass.
+ *
+ * a, b are network prefixes (host bits zero by construction, ARCHITECTURE.md
+ * §3.3) of the same family. See ARCHITECTURE.md §5.4 sibling merge.
  */
 static bool
 prefixes_are_siblings(const cidr_prefix_t *a, const cidr_prefix_t *b)
 {
-	cidr_prefix_t super_a, super_b;
-	size_t addr_len;
+	const uint8_t *a_bytes;
+	const uint8_t *b_bytes;
+	size_t full_bytes;
+	int parent_bits;
+	int bit_rem;
 
 	if (a->pfxlen != b->pfxlen || a->pfxlen == 0)
 		return false;
 	if (a->addr.family != b->addr.family)
 		return false;
 
-	/*
-	 * SAFETY: pfxlen > 0 ensures cidr_prefix_supernet will not return
-	 * CIDR_ERR_OVERFLOW. Both prefixes have valid, matching families.
-	 */
-	if (cidr_prefix_supernet(a, &super_a) != CIDR_OK)
-		return false;
-	if (cidr_prefix_supernet(b, &super_b) != CIDR_OK)
+	/* Supernet length: the shared parent sits at pfxlen - 1. */
+	parent_bits = (int)a->pfxlen - 1;
+	full_bytes = (size_t)(parent_bits / 8);
+	bit_rem = parent_bits % 8;
+
+	a_bytes = (const uint8_t *)&a->addr.addr;
+	b_bytes = (const uint8_t *)&b->addr.addr;
+
+	if (memcmp(a_bytes, b_bytes, full_bytes) != 0)
 		return false;
 
-	addr_len = (super_a.addr.family == CIDR_AF_INET) ? 4 : 16;
+	if (bit_rem > 0) {
+		uint8_t mask = (uint8_t)(0xFF << (8 - bit_rem));
 
-	return super_a.pfxlen == super_b.pfxlen &&
-	       memcmp(&super_a.addr.addr, &super_b.addr.addr, addr_len) == 0;
+		if ((a_bytes[full_bytes] & mask) !=
+		    (b_bytes[full_bytes] & mask))
+			return false;
+	}
+
+	return true;
+}
+
+/*
+ * prefix_supernet_into - write the parent prefix at pfxlen - 1 into out.
+ *
+ * Internal equivalent of cidr_prefix_supernet() for the merge loop: copies
+ * the network address, decrements the prefix length by one, and zeroes the
+ * host bits of the new length. The caller guarantees in->pfxlen > 0 (only
+ * confirmed siblings are merged), so there is no /0 overflow case and no
+ * per-call validation. Mirrors the masking in cidr_prefix.c prefix_mask_apply.
+ *
+ * The address is copied by struct assignment (family plus the full union)
+ * rather than memcpy; this is the only address copy in this file and avoids
+ * the raw memcpy that some clang-tidy configurations flag.
+ *
+ * in:       source network prefix (pfxlen > 0, same family as out)
+ * out:      destination prefix, fully written
+ * addr_len: address byte width (4 or 16), provided by the caller
+ */
+static void
+prefix_supernet_into(const cidr_prefix_t *in, cidr_prefix_t *out,
+                     size_t addr_len)
+{
+	uint8_t *bytes;
+	uint8_t new_pfxlen;
+	size_t full_bytes;
+	int rem;
+
+	new_pfxlen = (uint8_t)(in->pfxlen - 1);
+
+	out->addr = in->addr;
+	out->pfxlen = new_pfxlen;
+	bytes = (uint8_t *)&out->addr.addr;
+
+	full_bytes = (size_t)(new_pfxlen / 8);
+	rem = new_pfxlen % 8;
+
+	if (full_bytes < addr_len) {
+		if (rem > 0) {
+			bytes[full_bytes] &= (uint8_t)(0xFF << (8 - rem));
+			for (size_t i = full_bytes + 1; i < addr_len; i++)
+				bytes[i] = 0;
+		} else {
+			for (size_t i = full_bytes; i < addr_len; i++)
+				bytes[i] = 0;
+		}
+	}
 }
 
 /*
@@ -793,10 +858,10 @@ cidr_err_t
 cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 {
 	cidr_family_t family;
+	size_t addr_len;
 	size_t i;
 	size_t write_idx;
 	bool merged;
-	int cmp;
 
 	if (out_count == NULL)
 		return CIDR_ERR_INVAL;
@@ -819,6 +884,12 @@ cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 	}
 
 	/*
+	 * Family is now known and uniform, so the internal comparators below
+	 * take addr_len directly and skip per-pair revalidation.
+	 */
+	addr_len = radix_addr_len(family);
+
+	/*
 	 * Step 1: Radix sort by CIDR_SORT_NETWORK_ASC.
 	 * See ARCHITECTURE.md §5.4 step 1.
 	 */
@@ -830,9 +901,8 @@ cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 	 */
 	write_idx = 0;
 	for (i = 1; i < count; i++) {
-		if (cidr_prefix_cmp(&prefixes[write_idx], &prefixes[i], &cmp) !=
-		        CIDR_OK ||
-		    cmp != 0) {
+		if (!prefixes_equal_key(&prefixes[write_idx], &prefixes[i],
+		                        addr_len)) {
 			write_idx++;
 			if (write_idx != i)
 				prefixes[write_idx] = prefixes[i];
@@ -852,12 +922,8 @@ cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 	 */
 	write_idx = 0;
 	for (i = 1; i < count; i++) {
-		bool contained;
-
-		if (cidr_prefix_contains(&prefixes[write_idx],
-		                         &prefixes[i].addr,
-		                         &contained) == CIDR_OK &&
-		    contained)
+		if (bulk_prefix_contains(&prefixes[write_idx],
+		                         &prefixes[i].addr))
 			continue;
 
 		write_idx++;
@@ -883,11 +949,12 @@ cidr_bulk_aggregate(cidr_prefix_t *prefixes, size_t count, size_t *out_count)
 
 				/*
 				 * SAFETY: prefixes_are_siblings confirmed
-				 * pfxlen > 0 and matching supernets --
-				 * cidr_prefix_supernet cannot fail here.
+				 * pfxlen > 0, so the supernet at pfxlen - 1 is
+				 * well defined and prefix_supernet_into cannot
+				 * underflow the prefix length.
 				 */
-				(void)cidr_prefix_supernet(&prefixes[i],
-				                           &super);
+				prefix_supernet_into(&prefixes[i], &super,
+				                     addr_len);
 				prefixes[write_idx - 1] = super;
 				merged = true;
 			} else {
