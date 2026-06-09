@@ -14,6 +14,7 @@ import importlib.metadata
 import ipaddress
 import os
 import platform
+import random
 import statistics
 import sys
 import time
@@ -28,10 +29,11 @@ REPETITIONS = 3
 SINGLE_PARSE_COUNT = 100_000
 BULK_PARSE_COUNT = 100_000
 BULK_CONTAINS_ADDRS = 100_000
-BULK_CONTAINS_PREFIXES = 10_000
+BULK_CONTAINS_PREFIXES = 100
 AGGREGATE_PREFIXES = 50_000
 INDEX_PREFIXES = 10_000
 INDEX_LOOKUPS = 1_000_000
+TIMED_LOOKUP_SECONDS = 2.0
 
 
 def cpu_description() -> str:
@@ -86,6 +88,28 @@ def bench_rate(units: int, func: Callable[[], object]) -> float:
         if result is None:
             raise RuntimeError("benchmark function returned None")
         samples.append(units / elapsed)
+    return statistics.median(samples)
+
+
+def bench_timed_rate(func: Callable[[], int]) -> float:
+    """Return the median timed throughput in operations/sec.
+
+    The callback must execute a timed run and return the completed operation
+    count for that run; throughput is derived from completed operations and
+    wall-clock time.
+    """
+
+    samples: list[float] = []
+    for _ in range(REPETITIONS):
+        gc.collect()
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        start = time.perf_counter()
+        completed = func()
+        elapsed = time.perf_counter() - start
+        if gc_was_enabled:
+            gc.enable()
+        samples.append(completed / elapsed)
     return statistics.median(samples)
 
 
@@ -148,18 +172,43 @@ def build_ipv6_strings(count: int) -> list[str]:
 
 
 def build_bulk_contains_prefixes() -> list[str]:
-    """Create a 10k-prefix IPv4 table for bulk containment throughput.
+    """Create a 100-prefix first-match containment workload."""
 
-    NOTE: the default route is intentionally first so the pure-Python linear
-    scan baselines complete in practical time. This means libcidr.bulk_contains
-    measures first-match throughput while pytricia measures LPM throughput on
-    the same data. See ARCHITECTURE.md §8.8.1 and BASELINES.md footnotes.
-    """
+    prefixes: list[str] = []
 
-    prefixes = ["0.0.0.0/0"]
-    for i in range(BULK_CONTAINS_PREFIXES - 1):
-        prefixes.append(f"10.{(i >> 8) & 0xff}.{i & 0xff}.0/24")
+    for i in range(10):
+        prefixes.append(f"10.{i}.0.0/16")
+    for i in range(20):
+        prefixes.append(f"172.{16 + (i // 16)}.{(i % 16) * 16}.0/20")
+    for i in range(67):
+        prefixes.append(f"192.168.{i}.0/24")
+    prefixes.extend([
+        "192.0.2.0/24",
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+    ])
     return prefixes
+
+
+def build_bulk_contains_addresses(
+    prefixes: list[ipaddress.IPv4Network],
+) -> list[str]:
+    """Create a 60% match / 40% miss first-match address workload."""
+
+    rng = random.Random(20260610)
+    addrs: list[str] = []
+
+    for i in range(60_000):
+        prefix = prefixes[i % len(prefixes)]
+        host_slots = max(1, int(prefix.num_addresses) - 2)
+        addr_int = int(prefix.network_address) + 1 + (i % host_slots)
+        addrs.append(str(ipaddress.IPv4Address(addr_int)))
+
+    for i in range(40_000):
+        addrs.append(f"11.{(i >> 8) & 0xff}.{i & 0xff}.1")
+
+    rng.shuffle(addrs)
+    return addrs
 
 
 def build_index_prefixes() -> list[str]:
@@ -168,6 +217,57 @@ def build_index_prefixes() -> list[str]:
     prefixes = ["0.0.0.0/0"]
     for i in range(INDEX_PREFIXES - 1):
         prefixes.append(f"10.{(i >> 8) & 0xff}.{i & 0xff}.0/24")
+    return prefixes
+
+
+def build_index_queries(prefixes: list[str]) -> list[str]:
+    """Create 10k diverse covered addresses and repeat them for 1M lookups."""
+
+    rng = random.Random(20260611)
+    covered_prefixes = prefixes[1:]
+    base_queries: list[str] = []
+
+    for _ in range(10_000):
+        prefix = ipaddress.IPv4Network(rng.choice(covered_prefixes))
+        host = rng.randint(1, int(prefix.num_addresses) - 2)
+        base_queries.append(str(ipaddress.IPv4Address(int(prefix.network_address) + host)))
+
+    return base_queries * 100
+
+
+def build_aggregate_prefixes() -> list[str]:
+    """Create a 50k-prefix mixed-ratio aggregation workload.
+
+    The dataset is intentionally unsorted and combines non-mergeable /24s,
+    /24 sibling pairs, /23 sibling pairs, and duplicates. This exercises the
+    radix-sort front-end and requires multiple merge/dedup passes in the
+    aggregation back-end.
+    """
+
+    rng = random.Random(20260609)
+    prefixes: list[str] = []
+    unique_base = int(ipaddress.IPv4Address("20.0.0.0"))
+    pair24_base = int(ipaddress.IPv4Address("60.0.0.0"))
+    pair23_base = int(ipaddress.IPv4Address("80.0.0.0"))
+
+    for i in range(35_000):
+        prefixes.append(str(ipaddress.IPv4Network((unique_base + (i * 512), 24))))
+
+    for i in range(5_000):
+        block = pair24_base + (i * 512)
+        prefixes.append(str(ipaddress.IPv4Network((block, 24))))
+        prefixes.append(str(ipaddress.IPv4Network((block + 256, 24))))
+
+    for i in range(1_500):
+        block = pair23_base + (i * 1024)
+        prefixes.append(str(ipaddress.IPv4Network((block, 23))))
+        prefixes.append(str(ipaddress.IPv4Network((block + 512, 23))))
+
+    base_entries = prefixes[:]
+    for _ in range(2_000):
+        prefixes.append(rng.choice(base_entries))
+
+    rng.shuffle(prefixes)
     return prefixes
 
 
@@ -251,6 +351,54 @@ def lpm_netaddr_sorted(
     return result
 
 
+def timed_ipaddress_lookup_rate(
+    addrs: list[ipaddress.IPv4Address],
+    prefixes: list[ipaddress.IPv4Network],
+) -> int:
+    """Run timed ipaddress LPM-equivalent lookups over the cyclic query set."""
+
+    completed = 0
+    deadline = time.perf_counter() + TIMED_LOOKUP_SECONDS
+
+    while time.perf_counter() < deadline:
+        for addr in addrs:
+            match = -1
+            for idx, prefix in enumerate(prefixes):
+                if addr in prefix:
+                    match = idx
+                    break
+            completed += 1
+            if time.perf_counter() >= deadline:
+                break
+            if match < -1:
+                raise RuntimeError("unreachable")
+    return completed
+
+
+def timed_netaddr_lookup_rate(
+    addrs: list[netaddr.IPAddress],
+    prefixes: list[netaddr.IPNetwork],
+) -> int:
+    """Run timed netaddr LPM-equivalent lookups over the cyclic query set."""
+
+    completed = 0
+    deadline = time.perf_counter() + TIMED_LOOKUP_SECONDS
+
+    while time.perf_counter() < deadline:
+        for addr in addrs:
+            match = -1
+            for idx, prefix in enumerate(prefixes):
+                if addr in prefix:
+                    match = idx
+                    break
+            completed += 1
+            if time.perf_counter() >= deadline:
+                break
+            if match < -1:
+                raise RuntimeError("unreachable")
+    return completed
+
+
 def single_parse_rows() -> list[list[str]]:
     """Benchmark single-address parse throughput for IPv4 and IPv6."""
 
@@ -318,18 +466,14 @@ def bulk_contains_rows() -> list[list[str]]:
     """Benchmark 100k-address bulk containment throughput."""
 
     prefix_strs = build_bulk_contains_prefixes()
-    addr_strs = [f"10.{(i >> 8) & 0xff}.{i & 0xff}.1"
-                 for i in range(BULK_CONTAINS_ADDRS)]
+    ip_prefixes = [ipaddress.IPv4Network(src) for src in prefix_strs]
+    addr_strs = build_bulk_contains_addresses(ip_prefixes)
 
     lib_prefixes = [libcidr.IPv4Network(src) for src in prefix_strs]
     lib_addrs = [libcidr.IPv4Address(src) for src in addr_strs]
-    ip_prefixes = [ipaddress.IPv4Network(src) for src in prefix_strs]
     ip_addrs = [ipaddress.IPv4Address(src) for src in addr_strs]
     net_prefixes = [netaddr.IPNetwork(src) for src in prefix_strs]
     net_addrs = [netaddr.IPAddress(src) for src in addr_strs]
-    trie = pytricia.PyTricia()
-    for idx, prefix in enumerate(prefix_strs):
-        trie[prefix] = idx
 
     lib_rate = bench_rate(
         BULK_CONTAINS_ADDRS,
@@ -343,17 +487,12 @@ def bulk_contains_rows() -> list[list[str]]:
         BULK_CONTAINS_ADDRS,
         lambda: first_match_netaddr(net_addrs, net_prefixes),
     )
-    py_rate = bench_rate(
-        BULK_CONTAINS_ADDRS,
-        lambda: lpm_pytricia(addr_strs, trie),
-    )
 
     return [[
         f"{BULK_CONTAINS_ADDRS} addrs / {BULK_CONTAINS_PREFIXES} prefixes",
         fmt_rate(lib_rate),
         fmt_rate(ip_rate),
         fmt_rate(net_rate),
-        fmt_rate(py_rate),
         fmt_speedup(lib_rate, ip_rate),
     ]]
 
@@ -361,8 +500,7 @@ def bulk_contains_rows() -> list[list[str]]:
 def aggregate_rows() -> list[list[str]]:
     """Benchmark 50k-prefix aggregation throughput."""
 
-    prefix_strs = [f"10.{(i >> 8) & 0xff}.{i & 0xff}.0/24"
-                   for i in range(AGGREGATE_PREFIXES)]
+    prefix_strs = build_aggregate_prefixes()
     lib_prefixes = [libcidr.IPv4Network(src) for src in prefix_strs]
     ip_prefixes = [ipaddress.IPv4Network(src) for src in prefix_strs]
     net_prefixes = [netaddr.IPNetwork(src) for src in prefix_strs]
@@ -398,10 +536,7 @@ def index_rows() -> list[list[str]]:
         prefix_strs,
         key=lambda src: (-int(src.split("/", 1)[1]), src),
     )
-    query_strs = [
-        f"10.{((i % 16) >> 8) & 0xff}.{(i % 16) & 0xff}.1"
-        for i in range(INDEX_LOOKUPS)
-    ]
+    query_strs = build_index_queries(prefix_strs)
 
     lib_prefixes = [libcidr.IPv4Network(src) for src in prefix_strs]
     lib_index = libcidr.PrefixIndex(lib_prefixes)
@@ -430,13 +565,11 @@ def index_rows() -> list[list[str]]:
         INDEX_LOOKUPS,
         lambda: lib_index.lookup(lib_addrs),
     )
-    ip_lookup = bench_rate(
-        INDEX_LOOKUPS,
-        lambda: lpm_ipaddress_sorted(ip_addrs, ip_prefixes),
+    ip_lookup = bench_timed_rate(
+        lambda: timed_ipaddress_lookup_rate(ip_addrs, ip_prefixes),
     )
-    net_lookup = bench_rate(
-        INDEX_LOOKUPS,
-        lambda: lpm_netaddr_sorted(net_addrs, net_prefixes),
+    net_lookup = bench_timed_rate(
+        lambda: timed_netaddr_lookup_rate(net_addrs, net_prefixes),
     )
     py_lookup = bench_rate(
         INDEX_LOOKUPS,
@@ -489,8 +622,8 @@ def main() -> None:
         bulk_parse_rows(),
     )
     print_table(
-        "Bulk containment (M lookups/s)",
-        ["Workload", "libcidr", "ipaddress", "netaddr", "pytricia",
+        "Bulk containment: first-match containment, 60% match rate, no default route (M lookups/s)",
+        ["Workload", "libcidr", "ipaddress", "netaddr",
          "speedup vs ipaddress"],
         bulk_contains_rows(),
     )

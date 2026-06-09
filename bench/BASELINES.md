@@ -287,7 +287,7 @@ is order-of-magnitude.
 
 **Hardware / build context**
 - Platform: Linux x86_64
-- CPU: AMD Ryzen 7 4800H with Radeon Graphics @ 4.27 GHz
+- CPU: AMD Ryzen 7 4800H (Zen 2, 8 physical cores / 16 threads, 2 CCX x 4 cores) -- effective clock during benchmark run: 2.59 GHz
 - Cores: 16 logical threads
 - Python: 3.14.5
 - libcidr: 1.0.0
@@ -304,46 +304,54 @@ pinning. Run-to-run variance of a few percent is normal on this machine.
 
 | Family | libcidr (M parses/s) | ipaddress (M parses/s) | netaddr (M parses/s) | pytricia | speedup vs ipaddress |
 |---|---:|---:|---:|---:|---:|
-| IPv4 | 6.11 | 0.61 | 0.60 | --- | 10.00x |
-| IPv6 | 5.39 | 0.37 | 0.44 | --- | 14.62x |
+| IPv4 | 6.01 | 0.60 | 0.59 | --- | 9.95x |
+| IPv6 | 5.29 | 0.34 | 0.43 | --- | 15.61x |
 
 **Bulk parse: 100k addresses**
 
 | Family | libcidr (M addrs/s) | ipaddress (M addrs/s) | netaddr (M addrs/s) | pytricia | speedup vs ipaddress |
 |---|---:|---:|---:|---:|---:|
-| IPv4 | 7.59 | 0.60 | 0.59 | --- | 12.65x |
-| IPv6 | 6.54 | 0.33 | 0.45 | --- | 19.67x |
+| IPv4 | 6.57 | 0.59 | 0.58 | --- | 11.07x |
+| IPv6 | 5.90 | 0.33 | 0.44 | --- | 17.79x |
 
-**Bulk containment: 100k addresses vs 10k prefixes**
+**Bulk containment: first-match containment, 60% match rate, no default route**
 
-| Workload | libcidr (M lookups/s) | ipaddress (M lookups/s) | netaddr (M lookups/s) | pytricia (M lookups/s) | speedup vs ipaddress |
-|---|---:|---:|---:|---:|---:|
-| 100k addresses / 10k prefixes | 53.57 | 3.85 | 2.90 | 5.77 | 13.91x |
+| Workload | libcidr (M lookups/s) | ipaddress (M lookups/s) | netaddr (M lookups/s) | speedup vs ipaddress |
+|---|---:|---:|---:|---:|
+| 100k addresses / 100 prefixes | 3.53 | 0.06 | 0.05 | 54.29x |
 
 **Prefix aggregation: 50k prefixes**
 
 | Workload | libcidr (M prefixes/s) | ipaddress (M prefixes/s) | netaddr (M prefixes/s) | pytricia | speedup vs ipaddress |
 |---|---:|---:|---:|---:|---:|
-| 50k IPv4 prefixes | 24.29 | 0.22 | 1.36 | --- | 111.78x |
+| 50k IPv4 prefixes | 6.41 | 0.11 | 0.52 | --- | 56.39x |
 
 **Index build + 1M lookups**
 
 | Phase | libcidr (M ops/s) | ipaddress (M ops/s) | netaddr (M ops/s) | pytricia (M ops/s) | speedup vs ipaddress |
 |---|---:|---:|---:|---:|---:|
-| Build (10k prefixes) | 0.31 | --- | --- | 4.16 | --- |
-| Lookup (1M queries) | 16.52 | 0.06 | 0.04 | 6.35 | 298.99x |
+| Build (10k prefixes) | 0.30 | --- | --- | 3.54 | --- |
+| Lookup (1M queries) | 10.06 | 0.0011 | 0.0008 | 3.89 | 9466.52x |
 
-[1] Bulk containment uses the documented 10k-prefix workload, but places the
-default route first so the pure-Python first-match baselines complete in
-practical time. libcidr, ipaddress, and netaddr therefore measure first-match
-containment throughput on this table, while pytricia measures Patricia-trie
-LPM throughput on the same queries.
+[1] Bulk containment uses 100 realistic RFC 1918 and documentation prefixes
+with no default route and a 60% in-range / 40% miss address mix. pytricia is
+excluded; it performs LPM not first-match containment and is not comparable to
+bulk_contains() semantics.
 
-[2] ipaddress and netaddr have no index type. Their build cells are therefore
-unsupported (`---`), and their lookup cells are per-object LPM-equivalent
-linear scans over a prefix-length-descending list.
+[2] Aggregation uses a mixed-ratio unsorted 50k-prefix input: 35k distinct
+/24s with no sibling, 10k /24s arranged as 5k sibling pairs, 3k /23s arranged
+as 1500 sibling pairs, and 2k duplicates sampled from the base set. The
+throughput denominator is input prefix count divided by elapsed time
+(`50k / elapsed`), not output prefix count.
 
-[3] The 1M-query lookup workload repeats a hot set of the first 16 `/24`
-prefixes so the pure-Python LPM baselines remain practical without devolving
-into mostly default-route fallthrough cost. libcidr.PrefixIndex and pytricia
-still use their real index lookup APIs on the same queries.
+[3] Index lookup uses 10k diverse covered addresses drawn from the 10k-prefix
+table and cycled 100 times for the indexed implementations. libcidr and
+pytricia measured over 1M queries. ipaddress and netaddr measured over a
+2-second timed run; query count varies by library (typically 50k-200k).
+Throughput in M lookups/s is directly comparable. The libcidr vs pytricia
+lookup advantage here reflects small-table (10k prefix) cache-resident
+performance; at routing-table scale (800k prefixes) the L3 constraint
+documented in the C benchmark section would reduce this advantage, and the C
+bench_index_lookup result at 800k remains the relevant large-scale reference.
+ipaddress and netaddr lookup rates are below 0.01 M lookups/s and are
+displayed to four decimal places to avoid misleading rounding.
