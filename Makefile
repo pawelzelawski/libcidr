@@ -252,8 +252,12 @@ bench: $(BENCH_BULK_BIN) $(BENCH_INDEX_BIN)
 	$(BENCH_BULK_BIN)
 	$(BENCH_INDEX_BIN)
 
-bench-python:
-	@echo "Python benchmarks not yet implemented (Phase 8)"
+bench-python: $(PY_DIR)/$(PYEXT_ABI3)
+	@PYRUN="$(PY)";						\
+	if [ -x .venv/bin/python ]; then				\
+		PYRUN=.venv/bin/python;				\
+	fi;							\
+	PYTHONPATH=$(PY_DIR) "$${PYRUN}" bench/bench_python.py
 
 # --- lint: clang-tidy + cppcheck -----------------------------------------------
 

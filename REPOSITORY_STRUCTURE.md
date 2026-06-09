@@ -243,6 +243,13 @@ python/
                         #   IPv6Network -- embeds cidr_prefix_t (24 bytes) by value.
                         #   See ARCHITECTURE.md §8.3, §8.6, §8.7.
                         #
+                        # One index type:
+                        #   PrefixIndex -- holds cidr_index_t * (heap-allocated,
+                        #   not embedded by value). Constructor accepts list/tuple
+                        #   of network objects. lookup() returns list of int.
+                        #   Context manager protocol for deterministic resource
+                        #   release. See ARCHITECTURE.md §8.10.
+                        #
                         # One iterator type:
                         #   SubnetIterator -- embeds cidr_subnet_iter_t by value.
                         #   __iter__ returns self. __next__ raises StopIteration
@@ -276,10 +283,10 @@ python/
                         #   explicit family parameter, no Python object allocation
                         #   per address. See ARCHITECTURE.md §8.8.2.
                         #
-                        # Ownership: C structs embedded by value in PyObject
-                        #   allocations. No shared pointers. No cross-object
-                        #   lifetime dependencies. No custom tp_dealloc required.
-                        #   See ARCHITECTURE.md §8.10.
+                        # Ownership: address/network structs embedded by value in
+                        #   PyObject allocations. PrefixIndex owns a heap-allocated
+                        #   cidr_index_t * and frees it in tp_dealloc/__exit__.
+                        #   See ARCHITECTURE.md §8.10, §8.11.
 ```
 
 ---

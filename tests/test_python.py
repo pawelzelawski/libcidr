@@ -1344,6 +1344,101 @@ class TestBulkFunctions(unittest.TestCase):
             libcidr.bulk_sort(nets, libcidr.SORT_NETWORK_ASC)
 
 
+class TestPrefixIndex(unittest.TestCase):
+    """Verify PrefixIndex per ARCHITECTURE.md §8.10."""
+
+    def test_build_ipv4(self):
+        prefixes = [
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        index = libcidr.PrefixIndex(prefixes)
+        self.assertIsNotNone(index)
+
+    def test_build_ipv6(self):
+        prefixes = [
+            libcidr.IPv6Network('2001:db8::/32'),
+            libcidr.IPv6Network('2001:db8:1::/48'),
+        ]
+        index = libcidr.PrefixIndex(prefixes)
+        self.assertIsNotNone(index)
+
+    def test_lookup_match(self):
+        index = libcidr.PrefixIndex([
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ])
+        result = index.lookup([libcidr.IPv4Address('192.168.1.1')])
+        self.assertEqual(result, [1])
+
+    def test_lookup_no_match(self):
+        index = libcidr.PrefixIndex([
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ])
+        result = index.lookup([libcidr.IPv4Address('203.0.113.1')])
+        self.assertEqual(result, [-1])
+
+    def test_lookup_lpm(self):
+        index = libcidr.PrefixIndex([
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('10.1.0.0/16'),
+            libcidr.IPv4Network('10.1.2.0/24'),
+        ])
+        result = index.lookup([libcidr.IPv4Address('10.1.2.55')])
+        self.assertEqual(result, [2])
+
+    def test_lookup_empty_result(self):
+        index = libcidr.PrefixIndex([libcidr.IPv4Network('10.0.0.0/8')])
+        self.assertEqual(index.lookup([]), [])
+
+    def test_build_empty_raises(self):
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            libcidr.PrefixIndex([])
+
+    def test_build_mixed_family_raises(self):
+        with self.assertRaises(libcidr.FamilyError):
+            libcidr.PrefixIndex([
+                libcidr.IPv4Network('10.0.0.0/8'),
+                libcidr.IPv6Network('2001:db8::/32'),
+            ])
+
+    def test_lookup_wrong_family_raises(self):
+        index = libcidr.PrefixIndex([libcidr.IPv4Network('10.0.0.0/8')])
+        with self.assertRaises(libcidr.FamilyError):
+            index.lookup([libcidr.IPv6Address('2001:db8::1')])
+
+    def test_context_manager(self):
+        with libcidr.PrefixIndex([libcidr.IPv4Network('10.0.0.0/8')]) as index:
+            self.assertEqual(index.lookup([libcidr.IPv4Address('10.1.2.3')]), [0])
+        with self.assertRaises(libcidr.InvalidArgumentError):
+            index.lookup([libcidr.IPv4Address('10.1.2.3')])
+
+    def test_repr_ipv4(self):
+        index = libcidr.PrefixIndex([libcidr.IPv4Network('10.0.0.0/8')])
+        self.assertIn('IPv4', repr(index))
+
+    def test_repr_ipv6(self):
+        index = libcidr.PrefixIndex([libcidr.IPv6Network('2001:db8::/32')])
+        self.assertIn('IPv6', repr(index))
+
+    def test_lpm_matches_bulk_contains(self):
+        prefixes = [
+            libcidr.IPv4Network('10.1.2.0/24'),
+            libcidr.IPv4Network('10.1.0.0/16'),
+            libcidr.IPv4Network('10.0.0.0/8'),
+            libcidr.IPv4Network('192.168.0.0/16'),
+        ]
+        addrs = [
+            libcidr.IPv4Address('10.1.2.99'),
+            libcidr.IPv4Address('10.1.5.1'),
+            libcidr.IPv4Address('10.9.9.9'),
+            libcidr.IPv4Address('203.0.113.1'),
+        ]
+        index = libcidr.PrefixIndex(prefixes)
+        self.assertEqual(index.lookup(addrs), libcidr.bulk_contains(addrs, prefixes))
+
+
 class TestBulkContainsPacked(unittest.TestCase):
     """Verify bulk_contains_packed memoryview entry point per
     ARCHITECTURE.md §8.8.2."""

@@ -791,7 +791,7 @@ and detect regressions between versions.
 | Bulk parse: 100k addresses | `ipaddress` (list comp), `netaddr` | Measures construction throughput |
 | Bulk containment: 100k addresses vs 10k prefixes | `ipaddress`, `pytricia` | Primary value proposition |
 | Prefix aggregation: 50k prefixes | `ipaddress.collapse_addresses`, `netaddr` | |
-| Index build + 1M lookups | `pytricia` | libcidr only for build; all three for lookup |
+| Index build + 1M lookups | `pytricia` | libcidr.PrefixIndex build + lookup vs pytricia build + lookup. ipaddress and netaddr show --- for build (no index type) and their per-object lookup rate for the lookup cell. |
 
 ### 8.2 Baseline Recording Format
 

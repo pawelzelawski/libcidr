@@ -990,7 +990,7 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 - Record baseline numbers in `bench/BASELINES.md` with full hardware context
   per TESTING.md §8.2
 
-**8.4 -- Python benchmark suite**
+**8.4 -- Python benchmark suite** ✓ DONE
 - Implement `bench/bench_python.py` per REPOSITORY_STRUCTURE.md §6
 - Benchmark against `ipaddress`, `netaddr`, and `pytricia` per TESTING.md §8.1
 - Record comparison table in `bench/BASELINES.md`

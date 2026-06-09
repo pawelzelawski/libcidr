@@ -11,6 +11,7 @@
  *   - cidr_set_python_error() helper (CODING_STANDARDS.md §6.4)
  *   - IPv4Address, IPv6Address types (ARCHITECTURE.md §8.6)
  *   - IPv4Network, IPv6Network types (ARCHITECTURE.md §8.7)
+ *   - PrefixIndex type (ARCHITECTURE.md §8.10)
  *   - SubnetIterator type (ARCHITECTURE.md §8.9)
  *   - Bulk entry points (ARCHITECTURE.md §8.8)
  *   - bulk_contains_packed memoryview entry point (ARCHITECTURE.md §8.8.2)
@@ -114,7 +115,7 @@ cidr_set_python_error(cidr_err_t rc, const char *context)
  * Struct definitions.
  * cidr_addr_t embedded by value in the PyObject allocation.
  * No heap-allocated members to free separately.
- * See ARCHITECTURE.md §8.10.
+ * See ARCHITECTURE.md §8.11.
  * ------------------------------------------------------------------- */
 
 typedef struct {
@@ -130,6 +131,7 @@ static PyTypeObject *ipv4address_type = NULL;
 static PyTypeObject *ipv6address_type = NULL;
 static PyTypeObject *ipv4network_type = NULL;
 static PyTypeObject *ipv6network_type = NULL;
+static PyTypeObject *prefixindex_type = NULL;
 static PyTypeObject *subnetiterator_type = NULL;
 
 /* -------------------------------------------------------------------
@@ -416,7 +418,7 @@ ipv6address_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 /* -------------------------------------------------------------------
  * tp_dealloc.
  * No heap-allocated members to free; just the base object dealloc.
- * See ARCHITECTURE.md §8.10.
+ * See ARCHITECTURE.md §8.11.
  * ------------------------------------------------------------------- */
 
 static void
@@ -1108,7 +1110,7 @@ static PyType_Spec ipv6address_spec = {
  * Struct definitions.
  * cidr_prefix_t embedded by value in the PyObject allocation.
  * No heap-allocated members to free separately.
- * See ARCHITECTURE.md §8.10.
+ * See ARCHITECTURE.md §8.11.
  * ------------------------------------------------------------------- */
 
 typedef struct {
@@ -1129,6 +1131,18 @@ typedef struct {
 	PyObject_HEAD cidr_subnet_iter_t iter;
 	cidr_family_t family;
 } SubnetIterator;
+
+/*
+ * PrefixIndex struct.
+ * Owns a heap-allocated cidr_index_t and records the index family and
+ * original prefix count for repr()/lookup() semantics.
+ * See ARCHITECTURE.md §8.10, §8.11.
+ */
+typedef struct {
+	PyObject_HEAD cidr_index_t *index;
+	cidr_family_t family;
+	size_t prefix_count;
+} PrefixIndex;
 
 /* -------------------------------------------------------------------
  * Helpers shared by address types and network types.
@@ -1536,7 +1550,7 @@ ipv6network_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 /* -------------------------------------------------------------------
  * tp_dealloc.
  * No heap-allocated members to free; just the base object dealloc.
- * See ARCHITECTURE.md §8.10.
+ * See ARCHITECTURE.md §8.11.
  * ------------------------------------------------------------------- */
 
 static void
@@ -2641,6 +2655,289 @@ bulk_addrs_from_list(PyObject *obj, size_t *count, cidr_family_t *family)
 	return arr;
 }
 
+/* ===================================================================
+ * PrefixIndex type.
+ * See ARCHITECTURE.md §8.10, CODING_STANDARDS.md §6.
+ * =================================================================== */
+
+/*
+ * prefixindex_destroy_owned - release the cidr_index_t owned by a
+ *                             PrefixIndex instance and mark it closed.
+ *
+ * self: PrefixIndex instance; may already have a NULL index after __exit__
+ *
+ * Destroys self->index if present and always stores NULL afterward so later
+ * lookup() calls fail with the documented "destroyed" error.
+ * See ARCHITECTURE.md §8.10.3, §8.11.
+ */
+static void
+prefixindex_destroy_owned(PrefixIndex *self)
+{
+	if (self->index != NULL) {
+		cidr_index_destroy(self->index);
+		self->index = NULL;
+	}
+}
+
+/*
+ * prefixindex_family_label - return the repr label for a cidr_family_t.
+ */
+static const char *
+prefixindex_family_label(cidr_family_t family)
+{
+	return family == CIDR_AF_INET ? "IPv4" : "IPv6";
+}
+
+/*
+ * PrefixIndex(networks) -> PrefixIndex
+ *
+ * Builds an immutable LC-trie index from a list/tuple of IPv4Network or
+ * IPv6Network objects. Mixed-family input raises FamilyError. Empty input
+ * raises InvalidArgumentError before cidr_index_create() is called.
+ * Backed by cidr_index_create(). See ARCHITECTURE.md §8.10.1.
+ */
+static PyObject *
+prefixindex_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+{
+	PyObject *prefixes_obj;
+	cidr_prefix_t *prefixes = NULL;
+	size_t count = 0;
+	cidr_family_t family = CIDR_AF_UNSPEC;
+	cidr_index_t *index = NULL;
+	PrefixIndex *self;
+	cidr_err_t rc;
+
+	(void)kwargs;
+
+	if (!PyArg_ParseTuple(args, "O", &prefixes_obj))
+		return NULL;
+
+	prefixes = bulk_extract_prefixes(prefixes_obj, &count, &family);
+	if (prefixes == NULL)
+		return NULL;
+	if (count == 0) {
+		free(prefixes);
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "PrefixIndex requires at least one prefix");
+		return NULL;
+	}
+
+	rc = cidr_index_create(prefixes, count, &index);
+	free(prefixes);
+	if (cidr_set_python_error(rc, NULL) < 0)
+		return NULL;
+
+	self = (PrefixIndex *)PyType_GenericNew(type, NULL, NULL);
+	if (self == NULL) {
+		cidr_index_destroy(index);
+		return NULL;
+	}
+	/*
+	 * Ownership transfer: cidr_index_create() returns heap-owned index
+	 * memory to this PrefixIndex instance. __exit__ and tp_dealloc are the
+	 * only release paths. See ARCHITECTURE.md §8.10, §8.11.
+	 */
+	self->index = index;
+	self->family = family;
+	self->prefix_count = count;
+	return (PyObject *)self;
+}
+
+/*
+ * PrefixIndex tp_dealloc.
+ *
+ * Releases the owned cidr_index_t, if any, then frees the Python object.
+ * Py_LIMITED_API leaves PyTypeObject opaque, so the binding uses
+ * PyObject_Del() rather than type->tp_free() for stable-ABI compatibility.
+ * See ARCHITECTURE.md §8.10.3, §8.11.
+ */
+static void
+prefixindex_dealloc(PyObject *obj)
+{
+	PrefixIndex *self = (PrefixIndex *)obj;
+
+	prefixindex_destroy_owned(self);
+	PyObject_Del(obj);
+}
+
+/*
+ * lookup(addrs) -> list[int]
+ *
+ * Returns the longest-prefix-match index for each address in addrs, or -1
+ * for no match. The returned indices refer to the original constructor
+ * sequence. Raises InvalidArgumentError if the index was destroyed by the
+ * context manager and FamilyError on address/index family mismatch.
+ * Backed by cidr_index_lookup(). See ARCHITECTURE.md §8.10.2.
+ */
+static PyObject *
+prefixindex_lookup(PyObject *self_obj, PyObject *args)
+{
+	PrefixIndex *self = (PrefixIndex *)self_obj;
+	PyObject *addrs_obj;
+	cidr_addr_t *addrs = NULL;
+	size_t count = 0;
+	cidr_family_t family = CIDR_AF_UNSPEC;
+	ssize_t stack_matches[4096];
+	ssize_t *matches = stack_matches;
+	PyObject *result = NULL;
+	cidr_err_t rc;
+
+	if (self->index == NULL) {
+		PyErr_SetString(libcidr_InvalidArgumentError,
+		                "index has been destroyed");
+		return NULL;
+	}
+	if (!PyArg_ParseTuple(args, "O", &addrs_obj))
+		return NULL;
+
+	addrs = bulk_addrs_from_list(addrs_obj, &count, &family);
+	if (addrs == NULL)
+		return NULL;
+	if (count == 0) {
+		free(addrs);
+		return PyList_New(0);
+	}
+	if (family != self->family) {
+		free(addrs);
+		PyErr_SetString(libcidr_FamilyError, "address family mismatch");
+		return NULL;
+	}
+
+	/*
+	 * SAFETY: keep stack usage bounded at 4096 matches (~32 KiB on LP64).
+	 * Larger lookup batches switch to heap storage so lookup() cannot grow
+	 * stack usage without bound. See ARCHITECTURE.md §8.10.2.
+	 */
+	if (count > (sizeof(stack_matches) / sizeof(stack_matches[0]))) {
+		// NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
+		matches = (ssize_t *)malloc(count * sizeof(*matches));
+		if (matches == NULL) {
+			free(addrs);
+			PyErr_NoMemory();
+			return NULL;
+		}
+	}
+
+	/*
+	 * LC-trie lookup returns longest-prefix-match indices into the original
+	 * constructor order. This differs from bulk_contains() unless the input
+	 * order was pre-sorted by descending prefix length. See ARCHITECTURE.md
+	 * §6 and §8.10.2.
+	 */
+	rc = cidr_index_lookup(self->index, addrs, count, matches, NULL);
+	free(addrs);
+	if (cidr_set_python_error(rc, NULL) < 0)
+		goto error;
+
+	result = PyList_New((Py_ssize_t)count);
+	if (result == NULL)
+		goto error;
+
+	for (size_t i = 0; i < count; i++) {
+		PyObject *value = PyLong_FromSsize_t(matches[i]);
+
+		if (value == NULL)
+			goto error;
+		if (PyList_SetItem(result, (Py_ssize_t)i, value) < 0) {
+			Py_DECREF(value);
+			goto error;
+		}
+	}
+
+	if (matches != stack_matches)
+		free(matches);
+	return result;
+
+error:
+	if (matches != stack_matches)
+		free(matches);
+	Py_XDECREF(result);
+	return NULL;
+}
+
+/*
+ * __enter__() -> self
+ *
+ * Returns self with an incremented reference count so PrefixIndex supports
+ * deterministic cleanup via the with-statement. See ARCHITECTURE.md §8.10.3.
+ */
+static PyObject *
+prefixindex_enter(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+	Py_INCREF(self);
+	return self;
+}
+
+/*
+ * __exit__(exc_type, exc, tb) -> False
+ *
+ * Releases the owned cidr_index_t immediately and returns False so any
+ * exception from the with-body propagates normally.
+ * See ARCHITECTURE.md §8.10.3.
+ */
+static PyObject *
+prefixindex_exit(PyObject *self_obj, PyObject *args)
+{
+	PyObject *exc_type;
+	PyObject *exc;
+	PyObject *tb;
+	PrefixIndex *self = (PrefixIndex *)self_obj;
+
+	if (!PyArg_ParseTuple(args, "OOO", &exc_type, &exc, &tb))
+		return NULL;
+	(void)exc_type;
+	(void)exc;
+	(void)tb;
+	prefixindex_destroy_owned(self);
+	Py_RETURN_FALSE;
+}
+
+/*
+ * PrefixIndex.__repr__() -> str
+ *
+ * Formats the stored prefix count and address family so large indexes are
+ * inspectable without exposing internal node state.
+ * See ARCHITECTURE.md §8.10.4.
+ */
+static PyObject *
+prefixindex_repr(PyObject *self_obj)
+{
+	PrefixIndex *self = (PrefixIndex *)self_obj;
+
+	return PyUnicode_FromFormat("PrefixIndex(%zd prefixes, family=%s)",
+	                            (Py_ssize_t)self->prefix_count,
+	                            prefixindex_family_label(self->family));
+}
+
+static PyMethodDef prefixindex_methods[] = {
+    {"lookup", prefixindex_lookup, METH_VARARGS,
+     "lookup(addrs) -> list[int]\n\n"
+     "Return the longest-prefix-match index for each address, or -1 if "
+     "no prefix matched."},
+    {"__enter__", prefixindex_enter, METH_NOARGS,
+     "__enter__() -> self\n\n"
+     "Return self so PrefixIndex may be used as a context manager."},
+    {"__exit__", prefixindex_exit, METH_VARARGS,
+     "__exit__(exc_type, exc, tb) -> bool\n\n"
+     "Release the underlying index and return False so exceptions are "
+     "not suppressed."},
+    {NULL, NULL, 0, NULL}};
+
+static PyType_Slot prefixindex_slots[] = {
+    {Py_tp_new, (void *)prefixindex_new},
+    {Py_tp_dealloc, (void *)prefixindex_dealloc},
+    {Py_tp_repr, (void *)prefixindex_repr},
+    {Py_tp_methods, (void *)prefixindex_methods},
+    {Py_tp_doc,
+     (void *)"PrefixIndex(networks) -> PrefixIndex\n\n"
+             "Wrap a libcidr LC-trie prefix index for longest-prefix-match "
+             "lookup."},
+    {0, NULL}};
+
+static PyType_Spec prefixindex_spec = {
+    "libcidr.PrefixIndex", sizeof(PrefixIndex), 0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, prefixindex_slots};
+
 /*
  * libcidr.bulk_parse(srcs) -> list
  *
@@ -3544,9 +3841,10 @@ PyInit_libcidr(void)
 			goto error;
 	}
 
-	/* --- Type registration: IPv4Network, IPv6Network, SubnetIterator ---
+	/* --- Type registration: IPv4Network, IPv6Network, PrefixIndex,
+	 *     SubnetIterator ---
 	 */
-	/* See ARCHITECTURE.md §8.7, §8.9. */
+	/* See ARCHITECTURE.md §8.7, §8.10, §8.9. */
 
 	{
 		PyObject *v4ntype = PyType_FromSpec(&ipv4network_spec);
@@ -3566,6 +3864,16 @@ PyInit_libcidr(void)
 		ipv6network_type = (PyTypeObject *)v6ntype;
 		Py_INCREF(v6ntype);
 		if (PyModule_AddObject(m, "IPv6Network", v6ntype) < 0)
+			goto error;
+	}
+	{
+		PyObject *ptype = PyType_FromSpec(&prefixindex_spec);
+
+		if (ptype == NULL)
+			goto error;
+		prefixindex_type = (PyTypeObject *)ptype;
+		Py_INCREF(ptype);
+		if (PyModule_AddObject(m, "PrefixIndex", ptype) < 0)
 			goto error;
 	}
 	{
@@ -3604,6 +3912,8 @@ error:
 	ipv4network_type = NULL;
 	Py_XDECREF((PyObject *)ipv6network_type);
 	ipv6network_type = NULL;
+	Py_XDECREF((PyObject *)prefixindex_type);
+	prefixindex_type = NULL;
 	Py_XDECREF((PyObject *)subnetiterator_type);
 	subnetiterator_type = NULL;
 	Py_DECREF(m);

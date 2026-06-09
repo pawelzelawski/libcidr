@@ -1395,8 +1395,10 @@ family discriminator because that is correct for C; the Python layer uses
 four types because that is correct for Python. The binding code is mechanical
 boilerplate; the extra types add no design complexity.
 
-Each Python type embeds its corresponding C struct by value directly in the
-`PyObject` allocation. See §8.10 for the ownership model.
+Each address/network Python type embeds its corresponding C struct by value
+directly in the `PyObject` allocation. `PrefixIndex` is the exception: it owns
+a heap-allocated `cidr_index_t *`. See §8.10 and §8.11 for the ownership
+model.
 
 ### 8.4 ipaddress Compatibility Contract
 
@@ -1780,7 +1782,52 @@ The iterator is pauseable -- a `break` from the iteration loop is safe. The
 iterator object is freed by CPython's reference counting when it goes out of
 scope. No cleanup call is required.
 
-### 8.10 Ownership and Reference Counting
+### 8.10 Prefix Index Type -- PrefixIndex
+
+One Python type wraps the C LC-trie index: `libcidr.PrefixIndex`.
+The type holds a heap-allocated `cidr_index_t` pointer. Unlike the four
+address/network types which embed C structs by value, `PrefixIndex` owns
+a heap allocation and calls `cidr_index_destroy()` in `tp_dealloc`.
+
+Thread safety: concurrent `lookup()` calls on the same `PrefixIndex` from
+multiple threads are safe. The index is immutable after construction per
+ARCHITECTURE.md §1.4.
+
+#### 8.10.1 Constructor
+
+`PrefixIndex(networks)` -- accepts a `list` or `tuple` of `IPv4Network` or
+`IPv6Network` objects. Extracts `cidr_prefix_t` from each network object,
+calls `cidr_index_create()`, and stores the pointer. Mixed-family input
+raises `FamilyError`. Empty sequence raises `InvalidArgumentError` (maps to
+`cidr_index_create count == 0` rejection). Raises `MemoryError` on
+allocation failure.
+
+#### 8.10.2 Methods
+
+`lookup(addrs) -> list[int]`
+
+Accepts a `list` or `tuple` of address objects matching the index family.
+Returns a `list` of `int` where `result[i]` is the index (into the original
+networks sequence passed to the constructor) of the longest-prefix match
+for `addrs[i]`, or `-1` if no prefix matched. Raises `FamilyError` on family
+mismatch between `addrs` and the index. Raises `InvalidArgumentError` if the
+index has been destroyed via the context manager protocol. Backed by
+`cidr_index_lookup()`.
+
+#### 8.10.3 Context Manager
+
+`__enter__` returns `self`. `__exit__` calls `cidr_index_destroy()` and sets the
+internal pointer to `NULL`, releasing all index memory immediately without
+waiting for garbage collection. Any `lookup()` call after `__exit__` raises
+`InvalidArgumentError`. Explicit resource management via with-statement is
+recommended for large routing-table-scale indexes.
+
+#### 8.10.4 Protocol
+
+`__repr__`: `PrefixIndex(<n> prefixes, family=IPv4)` or
+`PrefixIndex(<n> prefixes, family=IPv6)`
+
+### 8.11 Ownership and Reference Counting
 
 Each Python type object (`IPv4Address`, `IPv6Address`, `IPv4Network`,
 `IPv6Network`) embeds its corresponding C struct by value directly in the
