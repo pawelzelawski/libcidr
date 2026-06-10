@@ -1874,16 +1874,18 @@ method tables.
 
 ## 10. Open Items
 
-Items not yet designed. Each must be resolved before the relevant
-implementation phase begins.
+All design-time open items listed during the planning phases are now
+resolved by the project documentation suite:
 
-| Item | Blocks | Notes |
-|---|---|---|
-| Build system for Python extension | Build | Makefile confirmed for C library; Python extension build TBD |
-| Platform matrix and CI | Build | Linux + OpenBSD, amd64 + arm64; CI approach TBD |
-| C library test strategy | Testing | RFC conformance, property-based, round-trip TBD |
-| Python layer test strategy | Testing | stdlib comparison approach TBD |
-| Sanitizer integration | Testing | Valgrind, ASan, UBSan, TSan TBD |
+| Resolved item | Resolution |
+|---|---|
+| Python extension build | TECH_STACK.md §5 |
+| Platform matrix and CI | TECH_STACK.md §7.7 |
+| C library test strategy | TESTING.md |
+| Python layer test strategy | TESTING.md §7 |
+| Sanitizer integration | TECH_STACK.md §7 and TESTING.md §4 |
+
+No architecture-level open items remain for v1.0.0.
 
 **Confirmed out-of-scope decisions (permanently excluded):**
 

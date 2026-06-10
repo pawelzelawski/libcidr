@@ -995,7 +995,7 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 - Benchmark against `ipaddress`, `netaddr`, and `pytricia` per TESTING.md §8.1
 - Record comparison table in `bench/BASELINES.md`
 
-**8.5 -- Open items closure**
+**8.5 -- Open items closure** ✓ DONE
 - The open items in ARCHITECTURE.md §10 are fully resolved by this
   documentation suite:
   - Python extension build: TECH_STACK.md §5
@@ -1005,7 +1005,7 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
   - Sanitizer integration: TECH_STACK.md §7 and TESTING.md §4
 - Update ARCHITECTURE.md §10 to reflect all open items resolved
 
-**8.6 -- README.md**
+**8.6 -- README.md** ✓ DONE
 - Written for a C developer or Python developer coming to the project cold
 - Contents:
   - One-paragraph description (what it does, what it does not do)

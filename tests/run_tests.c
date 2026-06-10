@@ -6,7 +6,7 @@
 #include "test_harness.h"
 
 /*
- * test_addr.c -- Phase 2: address parsing and formatting tests.
+ * test_addr.c -- address parsing and formatting tests.
  * See TESTING.md §3.1 for IPv4 parsing conformance tests.
  */
 extern int test_ipv4_parse_valid(void);
@@ -45,9 +45,8 @@ extern int test_addr_cmp_family_mismatch(void);
 extern int test_addr_cmp_unspec(void);
 
 /*
- * test_prefix.c -- Phase 3: prefix construction, arithmetic, iteration,
+ * test_prefix.c -- prefix construction, arithmetic, iteration,
  *                  and comparison tests.
- * See DEVELOPMENT.md §Phase 3 Tests for the full test catalogue.
  */
 extern int test_prefix_parse_valid(void);
 extern int test_prefix_parse_hostbits_rejected(void);
@@ -84,8 +83,7 @@ extern int test_prefix_cmp_equal(void);
 extern int test_prefix_cmp_family_mismatch(void);
 
 /*
- * test_bulk.c -- Phase 4: bulk engine tests.
- * See DEVELOPMENT.md §Phase 4 Tests for the test catalogue.
+ * test_bulk.c -- bulk engine tests.
  */
 extern int test_bulk_parse_empty(void);
 extern int test_bulk_parse_single(void);
@@ -137,7 +135,7 @@ extern int test_concurrent_index_lookup(void);
 #endif
 
 /*
- * test_classify.c -- Phase 5: address classification tests.
+ * test_classify.c -- address classification tests.
  * See ARCHITECTURE.md §7 for the classification specification.
  */
 extern int test_classify_each_ipv4_block(void);
@@ -154,8 +152,7 @@ extern int test_classify_null(void);
 extern int test_classify_unspec(void);
 
 /*
- * test_index.c -- Phase 6: Patricia trie index tests.
- * See DEVELOPMENT.md §Phase 6 Tests.
+ * test_index.c -- Patricia trie index tests.
  */
 extern int test_index_create_count_zero(void);
 extern int test_index_create_null(void);

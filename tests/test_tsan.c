@@ -310,7 +310,6 @@ test_concurrent_bulk_aggregate_independent(void)
  * Worker structs are heap-allocated to avoid TSan false positives on stack
  * memory reuse between consecutive test functions.
  *
- * This is the Phase 8 TSan gate from DEVELOPMENT.md §8.2 and TESTING.md §4.3.
  * Runs only under make test-tsan (requires TSan instrumentation).
  */
 int
@@ -361,7 +360,6 @@ cleanup: {
  * test_concurrent_index_lookup - build one index and query it from multiple
  * threads concurrently.
  *
- * This is the Phase 6 TSan gate from TESTING.md §4.3.
  */
 int
 test_concurrent_index_lookup(void)

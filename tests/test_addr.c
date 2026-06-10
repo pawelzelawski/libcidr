@@ -2,7 +2,6 @@
  * test_addr.c - address parsing, formatting, IPv4-mapped extraction,
  *               and address comparison tests.
  *
- * See DEVELOPMENT.md §Phase 2 for the required test cases.
  * See TESTING.md §3.1 for IPv4 parsing conformance tests.
  * See TESTING.md §3.2 for IPv6 parsing conformance tests.
  */

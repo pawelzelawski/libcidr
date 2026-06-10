@@ -4,7 +4,6 @@
  * Tests for cidr_bulk_parse() batch parse semantics and the shared
  * in-place MSD radix sort engine / cidr_bulk_sort().
  *
- * See DEVELOPMENT.md §Phase 4 Tests for the full test catalogue.
  */
 
 #include <stdint.h>

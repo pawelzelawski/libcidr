@@ -839,7 +839,6 @@ test_index_lookup_unspec_address(void)
  * table. Spot-checks 1000 addresses (every 100th prefix) for correct
  * original-index and matching prefix value.
  *
- * See DEVELOPMENT.md Phase 6 Tests.
  */
 int
 test_index_routing_table_scale(void)

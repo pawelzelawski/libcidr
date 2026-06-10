@@ -8,7 +8,6 @@
  *
  * See ARCHITECTURE.md §7 for the classification specification,
  * ARCHITECTURE.md §7.2 for the block tables.
- * See DEVELOPMENT.md §Phase 5 Tests for the full test catalogue.
  */
 
 #include <string.h>

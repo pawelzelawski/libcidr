@@ -9,7 +9,6 @@
  * cidr_prefix_cmp.
  *
  * See TESTING.md §2.2 for test scope boundaries.
- * See DEVELOPMENT.md §Phase 3 Tests for the named test case catalogue.
  */
 
 #include <string.h>

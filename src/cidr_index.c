@@ -8,8 +8,8 @@
  * cidr_index_lookup(): longest-prefix match for each address in
  *   caller-provided array.
  *
- * Phase 6.3 implements level compression on top of the Phase 6.2
- * path-compressed Patricia trie. The final packed array follows the
+ * Implements level compression on top of the path-compressed Patricia trie.
+ * The final packed array follows the
  * precise DP recurrence in ARCHITECTURE.md §6.4.
  *
  * See ARCHITECTURE.md §6 for the Patricia trie specification.
@@ -34,7 +34,7 @@
 #define CIDR_LCTRIE_MAX_BRANCH 8
 
 /*
- * cidr_pat_node_t - internal Phase 6.2 Patricia trie node.
+ * cidr_pat_node_t - internal Patricia trie node.
  *
  * The LC-trie build first constructs a basic path-compressed binary trie.
  * The DP and packing passes then operate on this internal representation.
@@ -206,9 +206,9 @@ static bool
 patricia_node_alloc(uint32_t *next_free, size_t node_limit, uint32_t *out_idx)
 {
 	/*
-	 * SAFETY: UINT32_MAX is reserved throughout Phase 6 as the sentinel for
-	 * "no prefix"/"no child". Stop before next_free can advance past
-	 * UINT32_MAX - 1. See ARCHITECTURE.md §6.2.
+	 * SAFETY: UINT32_MAX is reserved throughout the trie build as the
+	 * sentinel for "no prefix"/"no child". Stop before next_free can
+	 * advance past UINT32_MAX - 1. See ARCHITECTURE.md §6.2.
 	 */
 	if ((size_t)*next_free >= node_limit)
 		return false;
@@ -238,8 +238,8 @@ patricia_node_alloc(uint32_t *next_free, size_t node_limit, uint32_t *out_idx)
  * Returns the index of the live subtree root, or CIDR_PAT_NONE when the range
  * is empty.
  *
- * See ARCHITECTURE.md §6.3 for the Phase 6.2 Patricia structure that the
- * Phase 6.3 LC-trie DP consumes.
+ * See ARCHITECTURE.md §6.3 for the Patricia structure that the
+ * LC-trie DP consumes.
  */
 static uint32_t
 patricia_subtree_build(const cidr_prefix_t *sorted, size_t start, size_t end,
@@ -557,7 +557,7 @@ patricia_dp_compute(cidr_pat_node_t *nodes, uint32_t pat_idx,
  * Dead slots are explicit array entries because lookup computes child
  * addresses by direct indexing. See ARCHITECTURE.md §6.4.2.
  *
- * SAFETY: dead descendants use the Phase 6 sentinel contract:
+ * SAFETY: dead descendants use the sentinel contract:
  * branch == 0 and prefix_idx == UINT32_MAX. The lookup terminates at these
  * leaves without treating them as matches. See ARCHITECTURE.md §6.2, §6.4.
  */
@@ -604,7 +604,7 @@ lctrie_pack_subtree(const cidr_pat_node_t *nodes, uint32_t pat_idx,
 
 	/*
 	 * SAFETY: skip is recomputed from conceptual Patricia bit positions,
-	 * not copied from the Phase 6.2 node. The formula matches
+	 * not copied from the Patricia node. The formula matches
 	 * ARCHITECTURE.md §6.4.4 exactly.
 	 */
 	packed_node->base = 0;
