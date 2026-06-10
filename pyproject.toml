@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libcidr"
-version = "1.0.0"
+version = "1.0.1"
 description = "Fast RFC-strict IPv4/IPv6 address arithmetic, CIDR manipulation, bulk prefix operations, and LPM indexing"
 readme = "README.md"
 license = "ISC"

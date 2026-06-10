@@ -21,8 +21,7 @@ ext = Extension(
     include_dirs=['include'],
     define_macros=defines,
     py_limited_api=True,
-    extra_compile_args=['-std=c11', '-O2', '-Wall', '-Wextra',
-                        '-DPy_LIMITED_API=0x030B0000'],
+    extra_compile_args=['-std=c11', '-O2', '-Wall', '-Wextra'],
 )
 
 setup(ext_modules=[ext])
