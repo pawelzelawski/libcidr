@@ -119,7 +119,7 @@ benchmark baseline source.
 **Scope**: bench_index_lookup throughput and IPv6 parse throughput
 **Hardware**: AMD Ryzen 7 4800H, 4MB effective L3 per CCX, 64-byte cache line
 
-### Investigation 1 — LC-trie node padding (12 -> 16 bytes)
+### Investigation 1 - LC-trie node padding (12 -> 16 bytes)
 
 **Hypothesis**: eliminating cache-line straddling (64 / 12 = 5.33 nodes
 per cache line) would reduce memory access penalty in the traversal loop.
@@ -142,7 +142,7 @@ a competing factor. The alignment benefit would be unobstructed and the
 same change could yield 8-15% on those platforms. Re-run this investigation
 on any server benchmark target before treating the revert as universal.
 
-### Investigation 2 — Software prefetch in traversal loop
+### Investigation 2 - Software prefetch in traversal loop
 
 **Hypothesis**: one-ahead __builtin_prefetch() in the LC-trie traversal
 descent block would hide dependent-load latency that hardware prefetchers
@@ -164,7 +164,7 @@ with shallower pipelines -- in particular Neoverse N1 (AWS Graviton 2,
 Ampere Altra) -- may show a positive result. Re-run this investigation on
 ARM64 when that benchmark column is available.
 
-### Investigation 3 — IPv6 hex digit lookup table
+### Investigation 3 - IPv6 hex digit lookup table
 
 **Hypothesis**: replacing the per-character conditional hex decoder with a
 256-entry lookup table would reduce branch pressure in the IPv6 parse hot
@@ -181,7 +181,7 @@ Above the 10% keep threshold.
 **Kept.** Change is in src/cidr_addr.c only. Full Linux gate passed:
 dev build, tests, valgrind, TSan, format, lint.
 
-### Investigation 4 — bulk containment mask-free comparator
+### Investigation 4 - bulk containment mask-free comparator
 
 **Date**: 2026-06-07
 **Scope**: bench_bulk_contains throughput
@@ -224,7 +224,7 @@ not a precise threshold.
 the Investigation 4 code change (internal mask-free comparator), not variance.
 Values are the stable figure across three consecutive runs.
 
-### Investigation 5 — aggregation internal comparators
+### Investigation 5 - aggregation internal comparators
 
 **Date**: 2026-06-07
 **Scope**: bench_bulk_aggregate and bench_aggregate_early_exit throughput
@@ -258,6 +258,62 @@ pfxlen-1, host-bits-zero results) are preserved. Three boundary tests added
 (IPv6 /64 sibling merge, /1 pair -> /0 default route, equal-length
 non-siblings). Full Linux gate passed: dev build (141/141), tests, valgrind
 (0 errors, 0 leaks), TSan (143/143, 0 races), format, lint.
+
+### Investigation 6 - LC-trie node packing order (BFS vs current order)
+
+**Date**: 2026-06-10
+**Scope**: bench_index_lookup throughput
+
+**Hypothesis**: the current node packing order (DFS / DP resolution order)
+does not cluster the most-accessed nodes (root and top levels) at the
+start of the contiguous array. Switching to strict BFS packing would
+keep hot nodes in L1/L2 cache across queries and improve lookup
+throughput.
+
+**Result**: bench_index_lookup 800k median: 24.04 -> 24.12 M queries/s
+(+0.33%). Below the 5% keep threshold. Build unchanged at 0.29-0.30
+M prefixes/s. Node count unchanged at 803,147.
+
+**Reverted.**
+
+The current packing order is already near-optimal for cache behavior on
+this hardware. BFS ordering produced no measurable benefit, which rules
+out physical memory layout as the explanation for the Investigation 7
+lookup regression.
+
+### Investigation 7 - MAX_BRANCH cap reduction (8 -> 6)
+
+**Date**: 2026-06-10
+**Scope**: bench_index_build throughput
+
+**Hypothesis**: reducing MAX_BRANCH from 8 to 6 eliminates evaluation of
+b=7 and b=8 candidates (384 of 510 path traversals per node, ~75% of
+DP work), reducing build cost with minimal impact on trie quality if the
+DP rarely chooses branch factors above 6 on real data.
+
+**Result**:
+- bench_index_build 800k: 0.30 -> 1.04 M prefixes/s (+247%, 3.5x).
+- bench_index_lookup 800k median: 24.04 -> 21.70 M queries/s (-10.29%).
+- Node count: 803,147 in both cases.
+
+**Reverted.** Lookup regression fell in the 10-15% manual-decision band and
+was confirmed reproducible across three runs. The regression was not
+recoverable via BFS packing (Investigation 6), establishing that it
+comes from logical trie structural differences at tie-break nodes, not
+from memory layout changes.
+
+**Hardware dependency**: the node count being identical for both caps
+confirms the DP never chooses b=7 or b=8 on this 800k-prefix dataset.
+On denser or differently-shaped prefix distributions, higher branch
+factors may be selected and the quality gap between MAX_BRANCH=6 and
+MAX_BRANCH=8 could be larger.
+
+**Build speed note**: the 3.5x build improvement is available at the cost
+of a real -10% lookup regression that cannot be separated from the
+change. The correct long-term solution for users requiring both fast
+build and fast lookup is a two-phase approach: fast Patricia-trie build
+(comparable to pytricia build speed) with optional LC-trie DP upgrade.
+This is out of scope for v1.
 
 [4] Previous baseline: bench_bulk_aggregate 5.59 / 5.70 / 5.65 / 5.46;
 bench_aggregate_early_exit 16.97 / 17.11 / 16.63 / 15.61 M prefixes/s. The

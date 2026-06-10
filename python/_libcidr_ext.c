@@ -2137,7 +2137,7 @@ ipv6network_hash(PyObject *self)
 }
 
 /*
- * sq_contains / __contains__ — implements "addr in network" syntax.
+ * sq_contains / __contains__ - implements "addr in network" syntax.
  * Delegates to network_contains_impl(). See ARCHITECTURE.md §8.7.4.
  * Returns 1 for contained, 0 for not, -1 on error (exception set).
  */
