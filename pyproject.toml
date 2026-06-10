@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "libcidr"
+version = "1.0.0"
+description = "Fast RFC-strict IPv4/IPv6 address arithmetic, CIDR manipulation, bulk prefix operations, and LPM indexing"
+readme = "README.md"
+license = {text = "ISC"}
+requires-python = ">=3.11"
+keywords = ["networking", "cidr", "ipv4", "ipv6", "prefix", "routing",
+            "bgp", "subnet", "lpm"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: ISC License (ISCL)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Internet",
+    "Topic :: System :: Networking",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/pawelzelawski/libcidr"
+Repository = "https://github.com/pawelzelawski/libcidr"
+"Bug Tracker" = "https://github.com/pawelzelawski/libcidr/issues"
+
+[tool.cibuildwheel]
+build = "cp311-*"
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64", "aarch64"]
+manylinux-x86_64-image = "manylinux2014"
+manylinux-aarch64-image = "manylinux2014"
