@@ -5,6 +5,9 @@ arithmetic, CIDR manipulation, bulk prefix operations, longest-prefix-match
 indexing, and IANA special-purpose address classification. It does not do
 routing protocol logic, network I/O, DNS resolution, or operational
 routability inference beyond the documented classification flags.
+Designed for Python users hitting pure-Python performance limits; see
+bench/BASELINES.md for measured comparisons against ipaddress, netaddr, and
+pytricia.
 
 ## Build Requirements
 
@@ -27,13 +30,18 @@ This builds `libcidr.a` and installs:
 
 ### Python Binding
 
+If installing from PyPI:
+
+```sh
+pip install libcidr
+```
+
+If building from source:
+
 ```sh
 make python-ext
 make python-install
 ```
-
-This builds the stable-ABI extension module and installs it into the active
-Python site-packages directory.
 
 ## Minimal C Example
 
@@ -79,6 +87,7 @@ Build example:
 ```sh
 cc -std=c11 -I/usr/local/include example.c -L/usr/local/lib -lcidr -o example
 ./example
+# output: private=yes contains=yes
 ```
 
 ## Minimal Python Example
@@ -101,8 +110,6 @@ print(libcidr.bulk_contains(addrs, prefixes))
 
 ## Known Limitations
 
-- Zero-allocation model for the C API except `cidr_index_create()`, which is
-  the only allocating library function
 - No network I/O
 - No DNS resolution
 - `CIDR_CLASS_GLOBAL` means no special-purpose block matched; it does not
@@ -115,5 +122,4 @@ internal specification.
 
 ## License
 
-ISC License. See [PROJECT.md](PROJECT.md) and the repository license notice
-for project metadata.
+ISC License. See [LICENSE](LICENSE).
