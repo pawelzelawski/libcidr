@@ -2,8 +2,8 @@
 
 ## Status Overview
 
-**Current Phase**: Phase 7 -- Python Binding Layer (COMPLETE)
-**Next Task**: Phase 8 -- Hardening, Benchmarks, and Release
+**Current Phase**: Phase 8 -- Hardening, Benchmarks, and Release (COMPLETE)
+**Next Task**: v1.0.0 release tag
 
 ### Phase Summary
 
@@ -16,7 +16,7 @@
 | 5 | Address Classification | COMPLETE | 12/12 | IANA table, classify function, tests |
 | 6 | Patricia Trie Index | COMPLETE | 22/22 | LC-trie lookup/destroy complete; Linux/OpenBSD validation gates passed |
 | 7 | Python Binding Layer | COMPLETE | 218/218 | CPython stable ABI extension; bulk_contains_packed memoryview entry point |
-| 8 | Hardening, Benchmarks, and Release | IN PROGRESS | 0/0 | Sanitizers and concurrent tests complete; benchmarks, README, and tag remain |
+| 8 | Hardening, Benchmarks, and Release | COMPLETE | N/A | All milestones confirmed; pre-commit checklist clean; v1.0.0 tag pending |
 
 ### Quality Milestones
 
@@ -27,14 +27,14 @@
 | M3 | All C tests pass on OpenBSD | CONFIRMED |
 | M4 | Valgrind clean on Linux | CONFIRMED |
 | M5 | ASan/UBSan clean on every target whose toolchain supports them | CONFIRMED |
-| M6 | TSan clean on Linux | CONFIRMED (8.1: `make test-tsan` 137/137, 0 races) |
+| M6 | TSan clean on Linux | CONFIRMED (8.7: `make test-tsan` 143/143, 0 races) |
 | M7 | clang-format clean | CONFIRMED |
 | M8 | clang-tidy zero warnings | CONFIRMED |
-| M9 | RFC conformance verified | PENDING |
-| M10 | bulk_aggregate matches ipaddress.collapse_addresses | PENDING |
+| M9 | RFC conformance verified | CONFIRMED (all RFC parse/format tests pass: test_addr.c, test_prefix.c, test_python.py) |
+| M10 | bulk_aggregate matches ipaddress.collapse_addresses | CONFIRMED (Phase 7 test_python.py: test_bulk_aggregate_matches_ipaddress passes) |
 | M11 | LC-trie LPM semantics verified | CONFIRMED |
 | M12 | Python binding all tests pass | COMPLETE |
-| M13 | Benchmark baselines recorded | PENDING |
+| M13 | Benchmark baselines recorded | CONFIRMED (bench/BASELINES.md: C baselines Phase 8.3, Python baselines Phase 8.4) |
 
 ---
 
@@ -1020,7 +1020,7 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
   - Link to ARCHITECTURE.md for design rationale
   - ISC license notice
 
-**8.7 -- Final checklist and release**
+**8.7 -- Final checklist and release** ✓ DONE
 - Work through the full pre-commit checklist from CODING_STANDARDS.md §7
   for the entire repository
 - Verify all quality milestone cells are marked confirmed
@@ -1028,15 +1028,15 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 
 ### Phase 8 Completion Criteria
 
-- [ ] TSan concurrent tests pass: `make test-tsan` clean on Linux -- M6
-- [ ] Valgrind clean on Linux -- M4
-- [ ] ASan/UBSan clean on all four targets -- M5
-- [ ] `make lint` zero warnings on all four targets -- M7, M8
-- [ ] All C tests pass on all four targets -- M2, M3
-- [ ] All Python tests pass on CPython 3.11, 3.12, 3.13 -- M12
-- [ ] Benchmark baselines recorded in `bench/BASELINES.md` -- M13
-- [ ] README.md complete; C and Python usage examples compile and run
-- [ ] All quality milestone status cells confirmed
+- [x] TSan concurrent tests pass: `make test-tsan` clean on Linux -- M6
+- [x] Valgrind clean on Linux -- M4
+- [x] ASan/UBSan clean on all four targets -- M5
+- [x] `make lint` zero warnings on all four targets -- M7, M8
+- [x] All C tests pass on all four targets -- M2, M3
+- [x] All Python tests pass on CPython 3.11, 3.12, 3.13 -- M12
+- [x] Benchmark baselines recorded in `bench/BASELINES.md` -- M13
+- [x] README.md complete; C and Python usage examples compile and run
+- [x] All quality milestone status cells confirmed
 - [ ] v1.0.0 release tag applied
 
 ---
