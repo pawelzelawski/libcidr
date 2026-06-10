@@ -7,7 +7,7 @@ name = "libcidr"
 version = "1.0.0"
 description = "Fast RFC-strict IPv4/IPv6 address arithmetic, CIDR manipulation, bulk prefix operations, and LPM indexing"
 readme = "README.md"
-license = {text = "ISC"}
+license = "ISC"
 requires-python = ">=3.11"
 keywords = ["networking", "cidr", "ipv4", "ipv6", "prefix", "routing",
             "bgp", "subnet", "lpm"]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: ISC License (ISCL)",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: C",
     "Programming Language :: Python :: 3",

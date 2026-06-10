@@ -1037,7 +1037,7 @@ baselines recorded. README.md written. v1.0.0 release tag applied.
 - [x] Benchmark baselines recorded in `bench/BASELINES.md` -- M13
 - [x] README.md complete; C and Python usage examples compile and run
 - [x] All quality milestone status cells confirmed
-- [ ] v1.0.0 release tag applied (rc1 dry run in progress)
+- [x] v1.0.0 release tag applied
 
 ---
 
